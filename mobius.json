@@ -1,7 +1,7 @@
 {
   "id": "webstudio",
   "name": "Web Studio",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Build a website with the agent and preview it live in an in-app browser.",
   "author": "mobius-os",
   "license": "MIT",
@@ -25,9 +25,7 @@
     ],
     "main.json": {
       "path": "files/index.html"
-    },
-    "chat_id.json": null,
-    "build/target.txt": "seeds/build/target.txt"
+    }
   },
   "runtime": {
     "imports": [
