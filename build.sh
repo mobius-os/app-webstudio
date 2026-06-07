@@ -72,12 +72,13 @@ fi
 # folder markers are noise in the served site).
 rm -rf "$SITE"
 mkdir -p "$SITE"
-if ! cp -a "$SRC/." "$SITE/" 2>build_copy.err; then
-  write_status error "" "Failed to assemble site: $(cat "$STORAGE_DIR/build_copy.err" 2>/dev/null || echo 'copy error')"
-  rm -f "$STORAGE_DIR/build_copy.err"
+COPY_ERR="$STORAGE_DIR/build/copy.err"
+if ! cp -a "$SRC/." "$SITE/" 2>"$COPY_ERR"; then
+  write_status error "" "Failed to assemble site: $(cat "$COPY_ERR" 2>/dev/null || echo 'copy error')"
+  rm -f "$COPY_ERR"
   exit 0
 fi
-rm -f "$STORAGE_DIR/build_copy.err"
+rm -f "$COPY_ERR"
 # Remove empty-folder placeholders from the served output.
 find "$SITE" -name .keep -type f -delete 2>/dev/null
 

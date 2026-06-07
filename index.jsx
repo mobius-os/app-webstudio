@@ -21,7 +21,10 @@ export function isSafeRelPath(path) {
   if (!value || value.startsWith('/') || value.includes('\\')) return false
   if (!NAME_RE.test(value)) return false
   const parts = value.split('/')
-  return parts.every((part) => part && part !== '.' && part !== '..')
+  // Reject a leading dash in any segment: build.sh treats a leading-dash target
+  // as a CLI flag and refuses it, so allowing it here would create a file the
+  // app shows + lets you set as main but can never build (opaque error).
+  return parts.every((part) => part && part !== '.' && part !== '..' && !part.startsWith('-'))
 }
 
 export function isSafeStoragePath(path) {
@@ -400,20 +403,28 @@ function HtmlPreview({ storage, entryPath, version }) {
     // Rewrite url(...) references inside a CSS string to blob URLs so an
     // inlined stylesheet's background-images / @font-face still load.
     const rewriteCssUrls = async (css) => {
-      const refs = []
-      const re = /url\(\s*(['"]?)([^'")]+)\1\s*\)/g
+      const URL_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/g
+      const refs = new Set()
       let m
-      while ((m = re.exec(css)) !== null) refs.push(m[2])
-      let out = css
-      for (const ref of [...new Set(refs)]) {
+      while ((m = URL_RE.exec(css)) !== null) refs.add(m[2].trim())
+      // Resolve each unique ref to a blob URL first, then replace ONLY the
+      // exact url(...) token. A plain substring replace (split/join) would
+      // also corrupt a longer ref that merely CONTAINS a shorter one — e.g.
+      // rewriting img/a.png would also hit img/a.png.webp.
+      const map = new Map()
+      for (const ref of refs) {
         const sitePath = resolveSiteAsset(ref, entryPath)
         if (!sitePath) continue
         try {
           const url = await blobUrlFor(sitePath)
-          if (url) out = out.split(ref).join(url)
+          if (url) map.set(ref, url)
         } catch { /* leave the original ref; it just won't load */ }
       }
-      return out
+      if (!map.size) return css
+      return css.replace(URL_RE, (whole, q, ref) => {
+        const url = map.get(ref.trim())
+        return url ? `url(${q}${url}${q})` : whole
+      })
     }
 
     ;(async () => {
@@ -3074,7 +3085,6 @@ const CSS = `
   color: var(--muted);
   flex: 0 0 auto;
 }
-.ws-tree-file--selected .ws-tree-icon { color: rgba(255,255,255,0.8); }
 .ws-tree-name {
   overflow: hidden;
   white-space: nowrap;
@@ -3228,7 +3238,7 @@ const CSS = `
 }
 .ws-modal-btn--primary {
   background: var(--accent);
-  color: #fff;
+  color: #062016;
   border-color: var(--accent);
 }
 .ws-modal-btn--danger {
