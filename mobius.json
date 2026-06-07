@@ -1,7 +1,7 @@
 {
   "id": "webstudio",
   "name": "Web Studio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Build a website with the agent and preview it live in an in-app browser.",
   "author": "mobius-os",
   "license": "MIT",
@@ -15,9 +15,9 @@
     "share_with_apps": "none"
   },
   "storage_seeds": {
-    "files/index.html": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n  <title>Hello from Web Studio</title>\n  <link rel=\"stylesheet\" href=\"style.css\" />\n</head>\n<body>\n  <main class=\"page\">\n    <header class=\"hero\">\n      <span class=\"badge\">Web Studio</span>\n      <h1>Hello from Web&nbsp;Studio</h1>\n      <p class=\"lede\">This is your starting point. Edit the files on the left, or ask the agent below to build the site you have in mind, then tap <strong>Build</strong> to preview it live.</p>\n      <a class=\"cta\" href=\"#features\">See what you can do</a>\n    </header>\n    <section id=\"features\" class=\"features\">\n      <article class=\"card\">\n        <h2>Describe it</h2>\n        <p>Tell the agent what you want \u2014 a landing page, a portfolio, a menu \u2014 in plain words.</p>\n      </article>\n      <article class=\"card\">\n        <h2>Edit it</h2>\n        <p>Tweak the HTML, CSS, and JS directly in the editor. Changes save as you type.</p>\n      </article>\n      <article class=\"card\">\n        <h2>Preview it</h2>\n        <p>Hit Build to assemble your files and see the result in the in-app browser.</p>\n      </article>\n    </section>\n    <footer class=\"foot\">Made with Web Studio on M\u00f6bius</footer>\n  </main>\n  <script src=\"app.js\"></script>\n</body>\n</html>\n",
-    "files/style.css": ":root {\n  --ink: #14201b;\n  --paper: #f7faf8;\n  --brand: #1f7a5a;\n  --brand-soft: #e4f1ea;\n  --muted: #5d6f67;\n  --line: #d8e4dd;\n}\n* { box-sizing: border-box; }\nbody {\n  margin: 0;\n  font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Inter, system-ui, sans-serif;\n  color: var(--ink);\n  background: var(--paper);\n  line-height: 1.6;\n}\n.page { max-width: 880px; margin: 0 auto; padding: 0 24px 64px; }\n.hero { text-align: center; padding: 72px 0 48px; }\n.badge {\n  display: inline-block;\n  padding: 5px 12px;\n  border-radius: 999px;\n  background: var(--brand-soft);\n  color: var(--brand);\n  font-size: 13px;\n  font-weight: 700;\n  letter-spacing: 0.02em;\n}\n.hero h1 {\n  margin: 18px 0 12px;\n  font-size: clamp(34px, 7vw, 56px);\n  line-height: 1.1;\n  letter-spacing: -0.02em;\n}\n.lede { max-width: 600px; margin: 0 auto 28px; font-size: 18px; color: var(--muted); }\n.cta {\n  display: inline-block;\n  padding: 13px 26px;\n  border-radius: 12px;\n  background: var(--brand);\n  color: #fff;\n  text-decoration: none;\n  font-weight: 700;\n  transition: transform 0.12s ease, box-shadow 0.12s ease;\n}\n.cta:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(31, 122, 90, 0.28); }\n.features {\n  display: grid;\n  gap: 18px;\n  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));\n  margin-top: 24px;\n}\n.card {\n  background: #fff;\n  border: 1px solid var(--line);\n  border-radius: 16px;\n  padding: 22px 22px 24px;\n}\n.card h2 { margin: 0 0 8px; font-size: 19px; }\n.card p { margin: 0; color: var(--muted); }\n.foot { margin-top: 48px; text-align: center; color: var(--muted); font-size: 14px; }\n",
-    "files/app.js": "// Smooth-scroll the in-page anchor and a tiny load greeting in the console.\ndocument.querySelectorAll('a[href^=\"#\"]').forEach((a) => {\n  a.addEventListener('click', (e) => {\n    const target = document.querySelector(a.getAttribute('href'));\n    if (target) {\n      e.preventDefault();\n      target.scrollIntoView({ behavior: 'smooth' });\n    }\n  });\n});\nconsole.log('Web Studio starter loaded \u2014 edit the files and hit Build.');\n",
+    "files/index.html": "seeds/files/index.html",
+    "files/style.css": "seeds/files/style.css",
+    "files/app.js": "seeds/files/app.js",
     "files-index.json": [
       "files/app.js",
       "files/index.html",
@@ -27,7 +27,7 @@
       "path": "files/index.html"
     },
     "chat_id.json": null,
-    "build/target.txt": "files/index.html"
+    "build/target.txt": "seeds/build/target.txt"
   },
   "runtime": {
     "imports": [
