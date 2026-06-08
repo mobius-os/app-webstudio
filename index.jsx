@@ -591,6 +591,51 @@ function fileIcon(name) {
   return '·'
 }
 
+// Toolbar glyphs. 24x24 stroked SVGs (the shared Möbius icon idiom: fill none,
+// currentColor stroke, round caps) so they inherit the theme text color and the
+// button's :disabled fade. aria-hidden — the buttons carry the accessible name
+// via aria-label/title.
+function EyeIcon({ size = 20 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+function CodeIcon({ size = 20 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="m8 6-6 6 6 6" />
+      <path d="m16 6 6 6-6 6" />
+    </svg>
+  )
+}
+function PlayIcon({ size = 20 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="M6 4.5 19 12 6 19.5V4.5Z" />
+    </svg>
+  )
+}
+function KebabIcon({ size = 18 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="5" r="0.6" />
+      <circle cx="12" cy="12" r="0.6" />
+      <circle cx="12" cy="19" r="0.6" />
+    </svg>
+  )
+}
+
 // In-app context menu. Native context menus / window.prompt are unavailable
 // in the mini-app sandbox (no allow-modals), and a native right-click menu
 // would also offer "back/reload/inspect" that make no sense here. So we render
@@ -680,37 +725,57 @@ function FileNode({
   const longPress = useLongPress((cx, cy) => {
     onContextMenu({ x: cx, y: cy, path: node.path, isFolder })
   })
+  // Open the per-item action menu (Set main / Rename / Delete) anchored at the
+  // kebab button. Same menu the right-click / long-press gesture opens — the
+  // visible ⋯ button just makes those actions discoverable on touch.
+  const openMenuFromButton = useCallback((e, isFolderItem) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const r = e.currentTarget.getBoundingClientRect()
+    onContextMenu({ x: r.right, y: r.bottom, path: node.path, isFolder: isFolderItem })
+  }, [node.path, onContextMenu])
   if (node.children.size === 0 && node.isFile) {
     const selected = node.path === selectedPath
     const isMain = node.path === mainPath
     return (
-      <button
-        type="button"
-        className={`ws-tree-file ${selected ? 'ws-tree-file--selected' : ''}`}
-        style={{ paddingLeft: `${10 + depth * 16}px` }}
-        role="treeitem"
-        aria-level={depth + 1}
-        aria-selected={selected}
-        tabIndex={-1}
-        data-tree-path={node.path}
-        data-parent-path={parentPath}
-        data-tree-kind="file"
-        onClick={() => onSelect(node.path)}
-        draggable
-        onDragStart={(e) => {
-          e.dataTransfer.setData('text/mobius-path', node.path)
-          e.dataTransfer.effectAllowed = 'move'
-        }}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          onContextMenu({ x: e.clientX, y: e.clientY, path: node.path, isFolder: false })
-        }}
-        {...longPress}
-      >
-        <span className="ws-tree-icon">{fileIcon(node.name)}</span>
-        <span className="ws-tree-name">{node.name}</span>
-        {isMain && <span className="ws-tree-main-badge" title="Preview renders this page">main</span>}
-      </button>
+      <div className="ws-tree-row">
+        <button
+          type="button"
+          className={`ws-tree-file ${selected ? 'ws-tree-file--selected' : ''}`}
+          style={{ paddingLeft: `${10 + depth * 16}px` }}
+          role="treeitem"
+          aria-level={depth + 1}
+          aria-selected={selected}
+          tabIndex={-1}
+          data-tree-path={node.path}
+          data-parent-path={parentPath}
+          data-tree-kind="file"
+          onClick={() => onSelect(node.path)}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('text/mobius-path', node.path)
+            e.dataTransfer.effectAllowed = 'move'
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            onContextMenu({ x: e.clientX, y: e.clientY, path: node.path, isFolder: false })
+          }}
+          {...longPress}
+        >
+          <span className="ws-tree-icon">{fileIcon(node.name)}</span>
+          <span className="ws-tree-name">{node.name}</span>
+          {isMain && <span className="ws-tree-main-badge" title="Preview renders this page">main</span>}
+        </button>
+        <button
+          type="button"
+          className="ws-tree-menu-btn"
+          aria-label={`Actions for ${node.name}`}
+          title="File actions"
+          onClick={(e) => openMenuFromButton(e, false)}
+        >
+          <KebabIcon />
+        </button>
+      </div>
     )
   }
   // Folder node — own row plus indented children. We filter `.keep` entries
@@ -760,39 +825,50 @@ function FileNode({
   }
   return (
     <>
-      <button
-        type="button"
-        className={`ws-tree-folder ${dropActive ? 'ws-tree-drop-active' : ''}`}
-        style={{ paddingLeft: `${10 + depth * 16}px` }}
-        role="treeitem"
-        aria-level={depth + 1}
-        aria-expanded={expanded}
-        tabIndex={-1}
-        data-tree-path={node.path}
-        data-parent-path={parentPath}
-        data-tree-kind="folder"
-        onClick={() => setExpanded((e) => !e)}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowRight' && !expanded) {
+      <div className="ws-tree-row">
+        <button
+          type="button"
+          className={`ws-tree-folder ${dropActive ? 'ws-tree-drop-active' : ''}`}
+          style={{ paddingLeft: `${10 + depth * 16}px` }}
+          role="treeitem"
+          aria-level={depth + 1}
+          aria-expanded={expanded}
+          tabIndex={-1}
+          data-tree-path={node.path}
+          data-parent-path={parentPath}
+          data-tree-kind="folder"
+          onClick={() => setExpanded((e) => !e)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowRight' && !expanded) {
+              e.preventDefault()
+              setExpanded(true)
+            } else if (e.key === 'ArrowLeft' && expanded) {
+              e.preventDefault()
+              setExpanded(false)
+            }
+          }}
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropActive(true) }}
+          onDragLeave={() => setDropActive(false)}
+          onDrop={(e) => dropMove(e, node.path)}
+          onContextMenu={(e) => {
             e.preventDefault()
-            setExpanded(true)
-          } else if (e.key === 'ArrowLeft' && expanded) {
-            e.preventDefault()
-            setExpanded(false)
-          }
-        }}
-        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropActive(true) }}
-        onDragLeave={() => setDropActive(false)}
-        onDrop={(e) => dropMove(e, node.path)}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          onContextMenu({ x: e.clientX, y: e.clientY, path: node.path, isFolder: true })
-        }}
-        {...longPress}
-      >
-        <span className="ws-tree-icon">{expanded ? '▾' : '▸'}</span>
-        <span className="ws-tree-name">{node.name}/</span>
-      </button>
+            onContextMenu({ x: e.clientX, y: e.clientY, path: node.path, isFolder: true })
+          }}
+          {...longPress}
+        >
+          <span className="ws-tree-icon">{expanded ? '▾' : '▸'}</span>
+          <span className="ws-tree-name">{node.name}/</span>
+        </button>
+        <button
+          type="button"
+          className="ws-tree-menu-btn"
+          aria-label={`Actions for ${node.name} folder`}
+          title="Folder actions"
+          onClick={(e) => openMenuFromButton(e, true)}
+        >
+          <KebabIcon />
+        </button>
+      </div>
       {expanded && (
         <div role="group" className="ws-tree-group">
           {sortedChildren.map((c) => (
@@ -1000,8 +1076,8 @@ function FileNavPanel({
           {files.length === 0 ? (
             canMutate ? (
               <div className="ws-drawer-empty">
-                No files yet. Tap “New file”, Upload, or ask the agent below to
-                make one. Long-press an .html file to set it as the main page.
+                No files yet. Tap “New file” or Upload to make one. Use a file’s
+                ⋯ menu to set it as the main page or delete it.
               </div>
             ) : null
           ) : (
@@ -1116,7 +1192,7 @@ function ChatPanel({
       persist: 'chat_id.json',
       title: 'Web Studio',
       systemPrompt,
-      picker: false,
+      picker: true,
       onTurnDone: () => { if (onFilesRef.current) onFilesRef.current() },
       onError: ({ error }) => { setError(typeof error === 'string' ? error : 'Embedded chat reported an error.') },
     }).then((nextHandle) => {
@@ -2560,8 +2636,8 @@ export default function App({ appId, token }) {
     if (!mainPath) {
       return (
         <div className="ws-preview-note">
-          No main page set yet. Open the file drawer and long-press an .html
-          file to set it as the main page, then Build.
+          No main page set yet. Open the file drawer, tap an .html file’s ⋯
+          menu, and choose “Set as main page”, then Build.
         </div>
       )
     }
@@ -2597,8 +2673,7 @@ export default function App({ appId, token }) {
         <div className="ws-preview-empty">
           <div className="ws-preview-empty-title">Web Studio</div>
           <div className="ws-preview-empty-body">
-            Open the file drawer to pick a file, or ask the agent below to
-            build your site.
+            Open the file drawer to pick a file.
           </div>
         </div>
       )
@@ -2668,33 +2743,29 @@ export default function App({ appId, token }) {
         <div className="ws-top-actions">
           {showHtmlControls && (
             <>
-              <div className="ws-seg-toggle" role="tablist" aria-label="View mode">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={viewMode === 'source'}
-                  className={`ws-seg-btn ${viewMode === 'source' ? 'ws-seg-btn--active' : ''}`}
-                  onClick={() => setViewMode('source')}
-                >
-                  Source
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={viewMode === 'preview'}
-                  className={`ws-seg-btn ${viewMode === 'preview' ? 'ws-seg-btn--active' : ''}`}
-                  onClick={() => setViewMode('preview')}
-                >
-                  Preview
-                </button>
-              </div>
+              {/* One icon toggles between the source editor and the live
+                  preview; its glyph names the destination (eye = show preview,
+                  code = back to source). */}
               <button
-                className="ws-toolbar-btn ws-toolbar-btn--primary"
+                type="button"
+                className="ws-icon-btn"
+                aria-pressed={viewMode === 'preview'}
+                aria-label={viewMode === 'preview' ? 'Show source' : 'Show preview'}
+                title={viewMode === 'preview' ? 'Show source' : 'Show preview'}
+                onClick={() => setViewMode((m) => (m === 'preview' ? 'source' : 'preview'))}
+              >
+                {viewMode === 'preview' ? <CodeIcon /> : <EyeIcon />}
+              </button>
+              <button
+                className="ws-icon-btn ws-icon-btn--primary"
                 onClick={handleBuild}
                 disabled={build.buildStatus === 'building'}
-                title={`Build + preview the main page (${mainPath.replace(/^files\//, '')})`}
+                aria-label={`Build and preview the main page (${mainPath.replace(/^files\//, '')})`}
+                title={build.buildStatus === 'building'
+                  ? 'Building…'
+                  : `Build + preview ${mainPath.replace(/^files\//, '')}`}
               >
-                {build.buildStatus === 'building' ? 'Building…' : 'Build'}
+                <PlayIcon />
               </button>
             </>
           )}
@@ -2836,50 +2907,37 @@ const CSS = `
   gap: 8px;
   min-width: 0;
 }
-.ws-toolbar-btn {
+/* ---- single-line icon toolbar (eye toggle + play Build) ----
+   Square 44x44 tap targets so the whole bar — filename, view toggle, Build —
+   stays on one line even on a narrow phone. */
+.ws-icon-btn {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
   min-height: 44px;
-  padding: 7px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
-  font: 650 12px/1 var(--font);
   cursor: pointer;
-  white-space: nowrap;
 }
-.ws-toolbar-btn--primary {
+.ws-icon-btn:active { background: var(--surface2, var(--surface)); }
+.ws-icon-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--accent);
+}
+.ws-icon-btn--primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #062016;
 }
-.ws-toolbar-btn:disabled {
+.ws-icon-btn:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-/* ---- segmented [Source | Preview] toggle ---- */
-.ws-seg-toggle {
-  display: inline-flex;
-  flex: 0 0 auto;
-  padding: 2px;
-  border-radius: 9px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-}
-.ws-seg-btn {
-  min-height: 44px;
-  padding: 5px 10px;
-  border: 0;
-  border-radius: 7px;
-  background: none;
-  color: var(--muted);
-  font: 650 11px/1 var(--font);
-  cursor: pointer;
-}
-.ws-seg-btn--active {
-  background: var(--surface2, var(--surface));
-  color: var(--text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 /* ---- body: content area + bounded chat, stacked ----
@@ -3102,11 +3160,20 @@ const CSS = `
   color: var(--muted);
   line-height: 1.5;
 }
+/* Each tree row pairs the (flex-growing) file/folder button with a trailing
+   ⋯ menu button. The row is the hover unit so the menu button reveals with the
+   row on a pointer device; on touch it is always visible (see below). */
+.ws-tree-row {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+}
 .ws-tree-file, .ws-tree-folder {
   display: flex;
   align-items: center;
   gap: 7px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 44px;
   padding: 7px 12px;
   text-align: left;
@@ -3117,6 +3184,30 @@ const CSS = `
   font-size: 13px;
   font-family: var(--font);
   outline: none;
+}
+/* Per-file ⋯ actions button. Faint until the row is hovered/focused so it does
+   not compete with the filename; on touch (no hover) it stays visible so the
+   actions are discoverable without a long-press. */
+.ws-tree-menu-btn {
+  flex: 0 0 auto;
+  width: 40px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+.ws-tree-row:hover .ws-tree-menu-btn,
+.ws-tree-menu-btn:focus-visible { opacity: 1; }
+.ws-tree-menu-btn:hover { color: var(--text); }
+.ws-tree-menu-btn:active { color: var(--accent); }
+@media (hover: none) {
+  .ws-tree-menu-btn { opacity: 1; }
 }
 .ws-tree-file:hover, .ws-tree-folder:hover {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
@@ -3421,18 +3512,5 @@ const CSS = `
   z-index: auto;
   box-shadow: none;
   white-space: nowrap;
-}
-
-/* Narrow phones: let the top bar wrap its actions onto a second row so the
-   [Source | Preview] toggle + Build never crowd the filename. */
-@media (max-width: 560px) {
-  .ws-top-bar {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-  .ws-top-actions {
-    grid-column: 1 / -1;
-    width: 100%;
-    justify-content: flex-end;
-  }
 }
 `
