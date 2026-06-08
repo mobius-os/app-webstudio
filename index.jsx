@@ -1,14 +1,17 @@
 import React, {
   useState, useEffect, useCallback, useMemo, useRef,
 } from 'react'
+import { EditorState, Compartment } from '@codemirror/state'
+import { EditorView, keymap } from '@codemirror/view'
+import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands'
 
 // Web Studio renders its build into a SANDBOXED iframe via srcdoc with NO
 // allow-same-origin token, so the generated site can never read this app's
 // localStorage / token or reach the storage API. We rewrite the built page's
 // relative asset refs into blob:/data: URLs (HtmlPreview below) so the single
 // page renders self-contained without granting same-origin. The source editor
-// shows raw text in a textarea (no markup interpretation), so no DOMPurify is
-// needed in the bundle.
+// shows raw text in CodeMirror (no markup interpretation — it edits HTML/CSS/JS
+// source as plain text), so no DOMPurify is needed in the bundle.
 
 // Allowed characters for any storage path the UI writes. NAME_RE mirrors the
 // server's `_SAFE_RE` (`[\w.\-/]+`); isSafeRelPath adds browser-side semantic
@@ -124,8 +127,8 @@ export function normalizeFileCacheSnapshot(parsed) {
 //     file tree + New file/folder/Upload + per-file context actions
 //     (rename / delete / set-as-main). Tapping a file or the backdrop
 //     closes it.
-//   - Main area: the SOURCE editor (a textarea) OR the built site
-//     (a sandboxed iframe), toggled. Images render inline.
+//   - Main area: the SOURCE editor (CodeMirror, plain-text mode) OR the built
+//     site (a sandboxed iframe), toggled. Images render inline.
 //   - Chat: a bottom panel with a bounded height so the embedded agent
 //     conversation + composer stay fully visible and scrollable. The
 //     user describes the site in prose; the sub-agent edits files in
@@ -1314,7 +1317,17 @@ function ModalView({ state }) {
 // ----------------------------------------------------------------------
 const FILE_CONTENT_CACHE_LIMIT = 20
 const FILE_CACHE_VERSION = 1
-const CHAT_HEIGHT_CACHE_VERSION = 1
+// v2: lowered the chat-panel floor so the chat can collapse to ~composer
+// height (hide-chat / full-vibe). Bumped so previously-stored heights, which
+// were clamped to the old 24% floor, re-clamp under the new floor rather than
+// pinning the panel open.
+const CHAT_HEIGHT_CACHE_VERSION = 2
+// The chat panel collapses to roughly the composer + head height. As a percent
+// of the body this floor lets the resizer (and the Home key) hide the chat so
+// the source editor gets nearly the whole viewport; the CSS min-height below
+// is the matching pixel floor. The 68% ceiling is unchanged.
+const CHAT_MIN_PCT = 12
+const CHAT_MAX_PCT = 68
 
 function fileCacheKey(appId) {
   return `webstudio:${appId}:files-cache:v${FILE_CACHE_VERSION}`
@@ -1328,7 +1341,7 @@ function readChatHeight(appId) {
   if (typeof localStorage === 'undefined') return 36
   const raw = Number(localStorage.getItem(chatHeightKey(appId)))
   if (!Number.isFinite(raw)) return 36
-  return Math.min(68, Math.max(24, raw))
+  return Math.min(CHAT_MAX_PCT, Math.max(CHAT_MIN_PCT, raw))
 }
 
 function readFileCache(appId) {
@@ -1397,6 +1410,117 @@ function SyncPill({ online, pending, hasRuntime }) {
       {label}
     </div>
   )
+}
+
+// ----------------------------------------------------------------------
+// CodeMirror source editor — a parallel copy of the plain editor in the Editor
+// app (app-editor/index.jsx), kept VERBATIM so both apps stay consistent. Web
+// Studio edits HTML/CSS/JS source, so only the plain-text path is used (no
+// markdown live-preview, no KaTeX, no syntax highlighting): `markdown` is
+// always false and `buildPlainExtensions` is the only stack.
+//
+// A plain-text theme for source — monospace, no markdown highlighting, no live
+// preview. The 2px var(--accent) caret matches the rest of the Möbius chrome.
+const cmThemePlain = EditorView.theme({
+  '&': { height: '100%', backgroundColor: 'transparent', color: 'var(--text)' },
+  '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--mono)', lineHeight: '1.6', fontSize: '13.5px' },
+  '.cm-content': { padding: '14px 16px 30vh', caretColor: 'var(--accent)' },
+  '&.cm-focused': { outline: 'none' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
+  '.cm-selectionBackground': { backgroundColor: 'color-mix(in srgb, var(--accent) 22%, transparent)' },
+  '&.cm-focused .cm-selectionBackground': { backgroundColor: 'color-mix(in srgb, var(--accent) 30%, transparent)' },
+})
+
+function buildPlainExtensions(onDocChange) {
+  return [
+    history(),
+    EditorView.lineWrapping,
+    keymap.of([indentWithTab, ...historyKeymap, ...defaultKeymap]),
+    cmThemePlain,
+    EditorView.updateListener.of((u) => { if (u.docChanged) onDocChange(u.state.doc.toString()) }),
+  ]
+}
+
+// ----------------------------------------------------------------------
+// CodeMirror React wrapper. Mounts an EditorView whose extension stack is
+// chosen by `markdown` (live-preview vs plain monospace). `value` seeds the
+// doc; an EXTERNAL change (open a different file, or the agent edited the file
+// and a SWR revalidation re-read it) replaces the whole doc — but only when the
+// user isn't the one who just typed it. We track the last value emitted by
+// local typing in `lastEmitted` so a parent re-render that echoes our own
+// onChange back as `value` does NOT reset the cursor (this is what fixes Web
+// Studio's old cursor-jump on each SWR poll). The view is rebuilt only when
+// `markdown`/`docKey` change (different file or syntax mode), because the
+// extension stack differs. `readOnly` is NOT a rebuild trigger: a transient
+// readOnly flip (meta briefly null on agent reload) would tear down the view
+// and reset the caret to position 0. Instead read-only is reconfigured live
+// through a Compartment, leaving the view (and cursor) intact.
+//
+// Web Studio passes markdown={false} always — buildMarkdownExtensions is not
+// imported here, so the markdown branch is unreachable and intentionally absent.
+// ----------------------------------------------------------------------
+function CodeEditor({ value, markdown: isMd, readOnly, docKey, onChange }) {
+  const host = useRef(null)
+  const view = useRef(null)
+  const onChangeRef = useRef(onChange)
+  const lastEmitted = useRef(value)
+  const roCompartment = useRef(null)
+  if (roCompartment.current === null) roCompartment.current = new Compartment()
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+
+  // Rebuild the view when the file (docKey) or the syntax mode (markdown)
+  // changes. Read-only lives in a compartment (reconfigured below), so a
+  // readOnly flip does NOT rebuild. Editing the same file just dispatches doc
+  // changes (effect further below).
+  useEffect(() => {
+    const emit = (text) => {
+      lastEmitted.current = text
+      if (onChangeRef.current) onChangeRef.current(text)
+    }
+    const base = buildPlainExtensions(emit)
+    const extensions = [
+      ...base,
+      roCompartment.current.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
+    ]
+    const state = EditorState.create({ doc: value || '', extensions })
+    const v = new EditorView({ state, parent: host.current })
+    view.current = v
+    lastEmitted.current = value || ''
+    return () => { v.destroy(); view.current = null }
+    // value/readOnly are intentionally omitted: a docKey change carries the new
+    // file's value (reacting to value would rebuild on every keystroke), and
+    // readOnly is reconfigured via the compartment effect below, not a rebuild.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docKey, isMd])
+
+  // Read-only toggled for the SAME view (meta resolved/cleared on reload) —
+  // reconfigure the compartment in place. No view rebuild, so the cursor stays.
+  useEffect(() => {
+    const v = view.current
+    if (!v) return
+    v.dispatch({
+      effects: roCompartment.current.reconfigure([
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly),
+      ]),
+    })
+  }, [readOnly])
+
+  // External value change for the SAME file (agent edit re-read, or a
+  // revalidation) — replace the doc, but skip our own echo so typing isn't
+  // interrupted and the cursor doesn't jump.
+  useEffect(() => {
+    const v = view.current
+    if (!v) return
+    if (value == null) return
+    if (value === lastEmitted.current) return
+    const cur = v.state.doc.toString()
+    if (value === cur) return
+    v.dispatch({ changes: { from: 0, to: cur.length, insert: value } })
+    lastEmitted.current = value
+  }, [value])
+
+  return <div ref={host} className="ws-cm-host" />
 }
 
 // ----------------------------------------------------------------------
@@ -1615,7 +1739,7 @@ export default function App({ appId, token }) {
   const [pending, setPending] = useState(0)
   const [chatHeight, setChatHeight] = useState(() => readChatHeight(appId))
   // Viewer mode, toggled by the [Source | Preview] segmented control. 'source'
-  // shows the editable textarea; 'preview' shows the MAIN page's built site.
+  // shows the editable CodeMirror source; 'preview' shows the MAIN page's built site.
   const [viewMode, setViewMode] = useState('source')
   // The designated MAIN page — the HTML the Preview renders. Persisted in
   // main.json and defaulted (below) to the first .html (preferring
@@ -1632,7 +1756,7 @@ export default function App({ appId, token }) {
   }, [appId, chatHeight])
 
   const resizeChatBy = useCallback((deltaPct) => {
-    setChatHeight((value) => Math.min(68, Math.max(24, value + deltaPct)))
+    setChatHeight((value) => Math.min(CHAT_MAX_PCT, Math.max(CHAT_MIN_PCT, value + deltaPct)))
   }, [])
 
   const beginChatResize = useCallback((event) => {
@@ -1644,12 +1768,14 @@ export default function App({ appId, token }) {
     if (!total) return
     const startY = event.clientY
     const startHeight = panel.getBoundingClientRect().height
-    const minPx = Math.min(220, total * 0.24)
-    const maxPx = Math.max(minPx, total - 180)
+    // Pixel floor mirrors CHAT_MIN_PCT so the drag can collapse the chat to
+    // ~composer height; the ceiling keeps a sliver of editor visible.
+    const minPx = total * (CHAT_MIN_PCT / 100)
+    const maxPx = Math.max(minPx, total * (CHAT_MAX_PCT / 100))
 
     const onMove = (moveEvent) => {
       const nextPx = Math.min(maxPx, Math.max(minPx, startHeight + startY - moveEvent.clientY))
-      setChatHeight(Math.min(68, Math.max(24, (nextPx / total) * 100)))
+      setChatHeight(Math.min(CHAT_MAX_PCT, Math.max(CHAT_MIN_PCT, (nextPx / total) * 100)))
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -1668,10 +1794,10 @@ export default function App({ appId, token }) {
       resizeChatBy(-4)
     } else if (event.key === 'Home') {
       event.preventDefault()
-      setChatHeight(24)
+      setChatHeight(CHAT_MIN_PCT)
     } else if (event.key === 'End') {
       event.preventDefault()
-      setChatHeight(68)
+      setChatHeight(CHAT_MAX_PCT)
     }
   }, [resizeChatBy])
 
@@ -2494,23 +2620,23 @@ export default function App({ appId, token }) {
           <div className="ws-readonly-note">
             Managed file — edit via the app, not the source.
           </div>
-          <textarea
-            className="ws-source-editor"
+          <CodeEditor
             value={fileContent}
+            markdown={false}
             readOnly
-            spellCheck={false}
-            aria-label={`Source for ${selectedPath} (read-only)`}
+            docKey={selectedPath}
+            onChange={handleEditorChange}
           />
         </div>
       )
     }
     return (
-      <textarea
-        className="ws-source-editor"
+      <CodeEditor
         value={fileContent}
-        onChange={(e) => handleEditorChange(e.target.value)}
-        spellCheck={false}
-        aria-label={`Source for ${selectedPath}`}
+        markdown={false}
+        readOnly={false}
+        docKey={selectedPath}
+        onChange={handleEditorChange}
       />
     )
   }
@@ -2605,8 +2731,8 @@ export default function App({ appId, token }) {
           role="separator"
           aria-label="Resize chat and preview areas"
           aria-orientation="horizontal"
-          aria-valuemin={24}
-          aria-valuemax={68}
+          aria-valuemin={CHAT_MIN_PCT}
+          aria-valuemax={CHAT_MAX_PCT}
           aria-valuenow={Math.round(chatHeight)}
           tabIndex={0}
           onPointerDown={beginChatResize}
@@ -2777,24 +2903,17 @@ const CSS = `
   overflow: hidden;
   background: var(--bg);
 }
-/* ---- source editor ---- */
-.ws-source-editor {
-  display: block;
+/* ---- source editor ----
+   The CodeMirror EditorView mounts inside .ws-cm-host. The host is a flex child
+   that fills the content area and clips its own overflow; CodeMirror's internal
+   .cm-scroller does the scrolling (cmThemePlain sets the monospace font + the
+   2px accent caret), so the host itself needs no padding or font. */
+.ws-cm-host {
   flex: 1 1 auto;
-  width: 100%;
-  height: 100%;
   min-height: 0;
-  padding: 14px 16px;
-  box-sizing: border-box;
-  resize: none;
-  border: 0;
-  outline: none;
+  width: 100%;
+  overflow: hidden;
   background: var(--bg);
-  color: var(--text);
-  font: 12.5px/1.62 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-.ws-source-editor:focus {
-  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 /* Managed .json files render read-only with an inline notice above the
@@ -2815,7 +2934,7 @@ const CSS = `
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
-.ws-editor-readonly .ws-source-editor { cursor: default; }
+.ws-editor-readonly .ws-cm-host { cursor: default; }
 
 /* ---- empty / notes ---- */
 .ws-preview-empty {
@@ -3098,8 +3217,11 @@ const CSS = `
 .ws-chat-panel {
   flex: 0 0 auto;
   height: var(--ws-chat-panel-height, 36%);
-  min-height: min(220px, 45%);
-  max-height: calc(100% - 180px);
+  /* Floor low enough to collapse to ~composer height (head + a row for the
+     composer): the hide-chat / full-vibe layout where the source editor takes
+     almost the whole viewport. Was min(220px, 45%), which pinned the chat open. */
+  min-height: min(96px, 18%);
+  max-height: calc(100% - 120px);
   display: flex;
   flex-direction: column;
   background: var(--surface);
