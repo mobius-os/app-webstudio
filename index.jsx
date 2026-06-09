@@ -581,14 +581,67 @@ function buildTree(paths) {
   return root
 }
 
-function fileIcon(name) {
+// File-type kind for the tree glyph. The glyph itself is a bare lucide-style
+// SVG (see FileGlyph) — the kind only selects which inner mark it draws.
+function fileKind(name) {
   const lower = name.toLowerCase()
-  if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'H'
-  if (lower.endsWith('.css')) return 'C'
-  if (lower.match(/\.(js|mjs|ts|jsx|tsx)$/)) return 'J'
-  if (lower.endsWith('.json')) return '{}'
-  if (lower.match(/\.(png|jpe?g|gif|webp|svg|ico)$/)) return 'i'
-  return '·'
+  if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'html'
+  if (lower.endsWith('.css')) return 'css'
+  if (lower.match(/\.(js|mjs|ts|jsx|tsx)$/)) return 'code'
+  if (lower.endsWith('.json')) return 'json'
+  if (lower.match(/\.(png|jpe?g|gif|webp|svg|ico)$/)) return 'image'
+  return 'file'
+}
+
+// Bare lucide-style file glyph for the tree (fill none, currentColor stroke,
+// round caps — the shared Möbius icon idiom). No bounding box / fill / boxed
+// padding: it inherits the row's text color exactly like the shell's icons.
+// Each kind draws the lucide "document" outline plus a small inner mark so the
+// type stays legible without reverting to a boxed letter tile.
+function FileGlyph({ name, size = 16 }) {
+  const kind = fileKind(name)
+  // Shared document outline (a page with a dog-eared corner) for non-image
+  // kinds; the image kind draws a picture frame instead.
+  const sharedProps = {
+    viewBox: '0 0 24 24', width: size, height: size, fill: 'none',
+    stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round',
+    strokeLinejoin: 'round', 'aria-hidden': true,
+  }
+  if (kind === 'image') {
+    return (
+      <svg {...sharedProps}>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <circle cx="8.5" cy="9.5" r="1.5" />
+        <path d="m21 16-5-5L5 20" />
+      </svg>
+    )
+  }
+  const page = <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+  const fold = <path d="M14 3v5h5" />
+  return (
+    <svg {...sharedProps}>
+      {page}
+      {fold}
+      {/* Inner mark distinguishes the file type while staying inside the page. */}
+      {kind === 'code' && <path d="m10 13-2 2 2 2M14 13l2 2-2 2" />}
+      {kind === 'json' && <path d="M11 12c-1 0-1.5.5-1.5 1.5S9 15 8 15c1 0 1.5.5 1.5 1.5S10 18 11 18M13 12c1 0 1.5.5 1.5 1.5S15 15 16 15c-1 0-1.5.5-1.5 1.5S14 18 13 18" />}
+      {kind === 'html' && <path d="M9 13.5 7.5 15 9 16.5M15 13.5 16.5 15 15 16.5M13 12.5l-2 5" />}
+      {kind === 'css' && <path d="M9 17c.5.6 1.4 1 2.3 1 1.2 0 2.2-.7 2.2-1.6 0-2-4.2-1.3-4.2-3.2 0-.9 1-1.5 2.1-1.5.8 0 1.6.3 2 .9" />}
+      {kind === 'file' && <path d="M9 14h6M9 17h4" />}
+    </svg>
+  )
+}
+
+// Bare chevron for folder rows — a lucide chevron, no box. Rotates via CSS when
+// the folder is expanded so the open/closed state matches the shell's idiom.
+function ChevronIcon({ size = 14 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  )
 }
 
 // Toolbar glyphs. 24x24 stroked SVGs (the shared Möbius icon idiom: fill none,
@@ -717,7 +770,7 @@ function useLongPress(onLongPress) {
 
 function FileNode({
   node, selectedPath, onSelect, depth,
-  onContextMenu, onMoveInto, mainPath, parentPath = '',
+  onContextMenu, onMoveInto, mainPath, openMenuPath, parentPath = '',
 }) {
   const [expanded, setExpanded] = useState(true)
   const [dropActive, setDropActive] = useState(false)
@@ -762,7 +815,7 @@ function FileNode({
           }}
           {...longPress}
         >
-          <span className="ws-tree-icon">{fileIcon(node.name)}</span>
+          <span className="ws-tree-icon"><FileGlyph name={node.name} /></span>
           <span className="ws-tree-name">{node.name}</span>
           {/* One compact accent dot marks the main page (the preview renders
               it) — no text chip. */}
@@ -778,7 +831,10 @@ function FileNode({
         <button
           type="button"
           className="ws-tree-menu-btn"
+          data-state={openMenuPath === node.path ? 'open' : 'closed'}
           aria-label={`Actions for ${node.name}`}
+          aria-haspopup="menu"
+          aria-expanded={openMenuPath === node.path}
           title="File actions"
           onClick={(e) => openMenuFromButton(e, false)}
         >
@@ -865,13 +921,18 @@ function FileNode({
           }}
           {...longPress}
         >
-          <span className="ws-tree-icon">{expanded ? '▾' : '▸'}</span>
+          <span className={`ws-tree-icon ws-tree-chevron ${expanded ? 'ws-tree-chevron--open' : ''}`}>
+            <ChevronIcon />
+          </span>
           <span className="ws-tree-name">{node.name}/</span>
         </button>
         <button
           type="button"
           className="ws-tree-menu-btn"
+          data-state={openMenuPath === node.path ? 'open' : 'closed'}
           aria-label={`Actions for ${node.name} folder`}
+          aria-haspopup="menu"
+          aria-expanded={openMenuPath === node.path}
           title="Folder actions"
           onClick={(e) => openMenuFromButton(e, true)}
         >
@@ -3246,15 +3307,24 @@ const CSS = `
 }
 .ws-ctx-item:active { background: var(--surface2, var(--surface)); }
 .ws-ctx-item--danger { color: var(--danger); }
+/* Bare file/folder glyph — a lucide SVG with no bounding box, fill, or boxed
+   padding (matches the shell's icons). It inherits the row's text color so it
+   tints to --accent on the selected row exactly like the shell. */
 .ws-tree-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  font-size: 11px;
-  font-weight: 700;
+  width: 18px;
   color: var(--muted);
   flex: 0 0 auto;
+}
+.ws-tree-icon svg { display: block; }
+/* Folder chevron points right when collapsed, rotates down when expanded. */
+.ws-tree-chevron {
+  transition: transform 0.12s ease;
+}
+.ws-tree-chevron--open {
+  transform: rotate(90deg);
 }
 .ws-tree-name {
   overflow: hidden;
