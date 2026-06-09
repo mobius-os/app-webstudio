@@ -119,7 +119,7 @@ export function normalizeFileCacheSnapshot(parsed) {
 // Web Studio mini-app for Möbius — a VSCode-shaped website builder.
 //
 // Layout (mobile-first):
-//   - Top bar: ☰ (toggle the left file drawer) · the open file's name
+//   - Top bar: the app logo (toggles the left file drawer) · the open file's name
 //     (+ a "main" badge if it's the page Build renders) · a segmented
 //     [Source | Preview] toggle and a primary Build button (both for the
 //     HTML entry).
@@ -900,7 +900,7 @@ function FileNode({
 }
 
 // Left slide-in file drawer (VSCode explorer shape): a panel that transforms
-// in from the left edge over a dimming backdrop, opened by the ☰ button.
+// in from the left edge over a dimming backdrop, opened by the logo toggle.
 // It is ALWAYS mounted (the `--open` class drives the transform).
 //
 // `canMutate` is false until the file index has been confirmed against the
@@ -1025,19 +1025,7 @@ function FileNavPanel({
       >
         <div className="ws-drawer-head">
           <div>
-            {/* Brand row mirrors the shell header: the app's own icon beside
-                its name. Replaces the bare "Files" title; item count sits
-                underneath as the secondary line. */}
-            <span className="ws-drawer-brand">
-              <img
-                className="ws-drawer-brand-logo"
-                src={`/api/apps/${appId}/icon`}
-                width={24}
-                height={24}
-                alt=""
-              />
-              <span className="ws-drawer-brand-name">Web Studio</span>
-            </span>
+            <span className="ws-drawer-title">Files</span>
             <span className="ws-drawer-count">{files.filter(p => !p.endsWith('/.keep')).length} items</span>
           </div>
         </div>
@@ -1771,6 +1759,9 @@ export default function App({ appId, token }) {
   const [navOpen, setNavOpen] = useState(false)
   const navHandleRef = useRef(null)
   const navToggleRef = useRef(null)
+  // Fall back to the ☰ glyph if the app has no custom icon (the /icon route
+  // 404s) so the drawer toggle never renders a broken-image box.
+  const [iconBroken, setIconBroken] = useState(false)
   const [selectedPath, setSelectedPath] = useState(() => cached?.lastPath || null)
   const [fileContent, setFileContent] = useState('')
   const [fileLoading, setFileLoading] = useState(false)
@@ -2695,6 +2686,8 @@ export default function App({ appId, token }) {
     <div className="ws-root">
       <style>{CSS}</style>
       <header className="ws-top-bar">
+        {/* The app's own logo is the drawer toggle, mirroring the Möbius shell
+            header where the logo (not a hamburger) opens the drawer. */}
         <button
           ref={navToggleRef}
           className="ws-nav-toggle"
@@ -2702,7 +2695,18 @@ export default function App({ appId, token }) {
           aria-label={navOpen ? 'Close file drawer' : 'Open file drawer'}
           aria-expanded={navOpen}
         >
-          ☰
+          {iconBroken ? (
+            '☰'
+          ) : (
+            <img
+              src={`/api/apps/${appId}/icon`}
+              width={28}
+              height={28}
+              alt=""
+              style={{ borderRadius: 6, display: 'block' }}
+              onError={() => setIconBroken(true)}
+            />
+          )}
         </button>
         <div className="ws-top-title">
           {openName
@@ -2830,6 +2834,7 @@ const CSS = `
   width: 44px;
   height: 44px;
   min-height: 44px;
+  padding: 0;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--bg);
@@ -2904,7 +2909,7 @@ const CSS = `
 /* ---- body: content area + bounded chat, stacked ----
    position: relative so the absolutely-positioned file drawer + its backdrop
    resolve against THIS box — i.e. they overlay only the area below the top
-   bar, leaving the ☰ toggle always tappable. */
+   bar, leaving the logo drawer toggle always tappable. */
 .ws-body {
   position: relative;
   flex: 1 1 auto;
@@ -3076,17 +3081,7 @@ const CSS = `
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
 }
-.ws-drawer-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.ws-drawer-brand-logo {
-  flex: 0 0 auto;
-  border-radius: 6px;
-  display: block;
-}
-.ws-drawer-brand-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.ws-drawer-title { font-size: 14px; font-weight: 600; color: var(--text); }
 .ws-drawer-count {
   display: block;
   margin-top: 2px;
