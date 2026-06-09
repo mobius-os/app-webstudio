@@ -764,7 +764,16 @@ function FileNode({
         >
           <span className="ws-tree-icon">{fileIcon(node.name)}</span>
           <span className="ws-tree-name">{node.name}</span>
-          {isMain && <span className="ws-tree-main-badge" title="Preview renders this page">main</span>}
+          {/* One compact accent dot marks the main page (the preview renders
+              it) — no text chip. */}
+          {isMain && (
+            <span
+              className="ws-tree-main-dot"
+              role="img"
+              aria-label="Main page (preview renders this)"
+              title="Preview renders this page"
+            />
+          )}
         </button>
         <button
           type="button"
@@ -898,7 +907,7 @@ function FileNode({
 // server (App owns the check). While false we disable add/delete so the user
 // can't queue an index write derived from an unconfirmed list.
 function FileNavPanel({
-  open, onClose, files, selectedPath, onSelect, canMutate,
+  appId, open, onClose, files, selectedPath, onSelect, canMutate,
   onCreateFile, onCreateFolder, onDeleteFile, onDeleteFolder,
   onUpload, onMove, onRename, mainPath, onSetMain, returnFocusRef,
 }) {
@@ -1016,7 +1025,19 @@ function FileNavPanel({
       >
         <div className="ws-drawer-head">
           <div>
-            <span className="ws-drawer-title">Files</span>
+            {/* Brand row mirrors the shell header: the app's own icon beside
+                its name. Replaces the bare "Files" title; item count sits
+                underneath as the secondary line. */}
+            <span className="ws-drawer-brand">
+              <img
+                className="ws-drawer-brand-logo"
+                src={`/api/apps/${appId}/icon`}
+                width={24}
+                height={24}
+                alt=""
+              />
+              <span className="ws-drawer-brand-name">Web Studio</span>
+            </span>
             <span className="ws-drawer-count">{files.filter(p => !p.endsWith('/.keep')).length} items</span>
           </div>
         </div>
@@ -1105,58 +1126,12 @@ function FileNavPanel({
 // iframe, so this app does not duplicate SSE handling, composer state,
 // attachments, provider controls, queueing, or polling.
 // ----------------------------------------------------------------------
-function bootstrapPrompt(appId) {
+function bootstrapPrompt() {
   return [
-    `You are the Web Studio sub-agent for Möbius app id ${appId}.`,
-    '',
-    `Your working directory is /data/apps/${appId}/files/. Build a`,
-    'self-contained static WEBSITE there using the Edit and Write tools. The',
-    'user describes the site in prose; you write the HTML/CSS/JS. Your default',
-    'action is to modify the project files, not to solve the task only in chat.',
-    'Prefer a SINGLE page: files/index.html that pulls in same-directory',
-    'assets (files/style.css, files/app.js, images). Keep markup semantic and',
-    'the styling clean and responsive. If the user asks for a feature, a',
-    'section, a layout, or copy that belongs on the page, write it into the',
-    'files unless they explicitly ask for a chat-only explanation. Keep the',
-    'user’s intent; do not invent sections they did not ask for. After',
-    'editing, summarise the change in ONE short sentence — the embedded chat',
-    'panel renders only the last assistant message.',
-    '',
-    'Keep the site BUILDABLE: the Build button copies everything under',
-    `/data/apps/${appId}/files/ into /data/apps/${appId}/build/site/ verbatim`,
-    '(a static site IS its files — no npm build step). So reference assets',
-    'with RELATIVE paths ("style.css", "./app.js", "img/logo.png"), never',
-    'absolute filesystem paths or "/data/..." URLs.',
-    '',
-    'PREVIEW LIMITATION: the in-app preview renders the MAIN page as a single',
-    'self-contained document, inlining its same-folder CSS/JS/images. Links to',
-    'OTHER .html pages do not navigate inside the preview. Prefer one index.html',
-    '(sections + in-page anchors, or JS-driven views) over multi-page sites.',
-    '',
-    `After creating or deleting a file, append/remove its path (relative to`,
-    `/data/apps/${appId}/, e.g. "files/style.css") in the JSON array at`,
-    `/data/apps/${appId}/files-index.json. The mini-app reads that file to`,
-    'populate its file tree; new files are invisible to the user until the',
-    'index is updated.',
-    '',
-    'Folders created by the user appear as a `<folder>/.keep` placeholder in',
-    'the index — the storage backend has no mkdir, so an empty folder is',
-    'materialised by writing that 0-byte file. Leave .keep files alone unless',
-    'the user explicitly asks to remove the folder.',
-    '',
-    `The MAIN page — the HTML file the preview renders — is recorded at`,
-    `/data/apps/${appId}/main.json as {"path": "files/<entry>.html"}. If you`,
-    'create a site whose entry is not files/index.html, update main.json to',
-    'point at it (keep its value to an existing .html). The user can also set',
-    'it from the file drawer.',
-    '',
-    'To build manually after edits: write the main page path (for example',
-    `"files/index.html") to /data/apps/${appId}/build/target.txt, then call:`,
-    `curl -sS -X POST -H "Authorization: Bearer $AGENT_TOKEN"`,
-    `"$API_BASE_URL/api/apps/${appId}/run-job". Poll or read`,
-    `/data/apps/${appId}/build/status.json for {"status":"done","entry":...}`,
-    'or {"status":"error","log":...}. Report build errors briefly and fix the',
-    'files when the error is actionable.',
+    'You help the user build their website in this app.',
+    'Use the embedded-app-agent skill, which carries the full methodology;',
+    'rely on the injected app_context for this app’s id, file paths, and',
+    'build commands.',
     '',
     'This is a silent setup brief — do NOT reply to it. Wait for the user’s',
     'first message and act on that.',
@@ -1175,7 +1150,7 @@ function ChatPanel({
   // the chat iframe — destroying a streaming turn mid-flight.
   const onFilesRef = useRef(onFilesMaybeChanged)
   useEffect(() => { onFilesRef.current = onFilesMaybeChanged }, [onFilesMaybeChanged])
-  const systemPrompt = useMemo(() => bootstrapPrompt(appId), [appId])
+  const systemPrompt = useMemo(() => bootstrapPrompt(), [])
 
   useEffect(() => {
     const mount = mountRef.current
@@ -1213,10 +1188,6 @@ function ChatPanel({
 
   return (
     <section className="ws-chat-panel">
-      <div className="ws-chat-head">
-        <span className="ws-chat-head-title">Agent</span>
-        <span className="ws-chat-head-hint">Describe your site — it writes the HTML</span>
-      </div>
       {error && <div className="ws-chat-error">{error}</div>}
       <div className="ws-chat-embed" ref={mountRef} />
     </section>
@@ -2541,7 +2512,6 @@ export default function App({ appId, token }) {
   // the Build button track the MAIN page (the preview always renders it),
   // not the currently-open file.
   const hasMain = !!mainPath
-  const selectedIsMain = !!selectedPath && selectedPath === mainPath
   // The site entry built from the MAIN page this session, if any: a
   // { entry, ver } record (ver is the build token).
   const entryForMain = (mainPath && build.entryByDoc[mainPath]) || null
@@ -2738,7 +2708,6 @@ export default function App({ appId, token }) {
           {openName
             ? <span className="ws-top-path" title={selectedPath}>{openName}</span>
             : <span className="ws-top-path ws-top-path--muted">No file open</span>}
-          {selectedIsMain && <span className="ws-top-main-badge" title="Preview renders this page">Main page</span>}
         </div>
         <div className="ws-top-actions">
           {showHtmlControls && (
@@ -2779,6 +2748,7 @@ export default function App({ appId, token }) {
         style={{ '--ws-chat-panel-height': `${chatHeight}%` }}
       >
         <FileNavPanel
+          appId={appId}
           open={navOpen}
           onClose={closeNav}
           files={files}
@@ -2891,15 +2861,6 @@ const CSS = `
   text-overflow: ellipsis;
 }
 .ws-top-path--muted { color: var(--muted); font-weight: 400; }
-.ws-top-main-badge {
-  flex: 0 0 auto;
-  padding: 3px 7px;
-  border-radius: 7px;
-  font: 650 11px/1.2 var(--font);
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-}
 .ws-top-actions {
   display: inline-flex;
   align-items: center;
@@ -3115,7 +3076,17 @@ const CSS = `
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
 }
-.ws-drawer-title { display: block; font-size: 14px; font-weight: 700; }
+.ws-drawer-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ws-drawer-brand-logo {
+  flex: 0 0 auto;
+  border-radius: 6px;
+  display: block;
+}
+.ws-drawer-brand-name { font-size: 14px; font-weight: 600; color: var(--text); }
 .ws-drawer-count {
   display: block;
   margin-top: 2px;
@@ -3225,20 +3196,15 @@ const CSS = `
   box-shadow: inset 3px 0 0 var(--accent);
 }
 .ws-tree-file--selected .ws-tree-icon { color: var(--accent); }
-.ws-tree-main-badge {
+/* Compact accent dot marking the main page row (no text chip). */
+.ws-tree-main-dot {
   margin-left: auto;
   flex: 0 0 auto;
-  padding: 2px 5px;
-  border-radius: 6px;
-  font: 650 9px/1.3 var(--font);
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-}
-.ws-tree-file--selected .ws-tree-main-badge {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .ws-tree-file[draggable="true"] { cursor: grab; }
 /* Drop-target highlight while a drag hovers a folder or the root. */
@@ -3339,27 +3305,6 @@ const CSS = `
   height: 3px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--muted) 65%, transparent);
-}
-.ws-chat-head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-height: 34px;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-.ws-chat-head-title {
-  font: 700 11px/1 var(--font);
-  color: var(--muted);
-}
-.ws-chat-head-hint {
-  font-size: 12px;
-  color: var(--muted);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .ws-chat-embed {
   flex: 1 1 auto;
