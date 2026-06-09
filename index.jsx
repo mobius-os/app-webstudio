@@ -981,6 +981,75 @@ function FileNavPanel({
   const closeCtx = useCallback(() => setCtx(null), [])
   useEffect(() => { if (!open) setCtx(null) }, [open])
 
+  // Swipe-left-to-close, ported faithfully from the Möbius shell Drawer:
+  // touchstart captures the origin (only when open + a single touch),
+  // touchmove drags the panel 1:1 with the finger while the gesture is
+  // dominantly horizontal-left, touchend either closes (≥70px past origin
+  // AND horizontal-dominant) or snaps back. The CSS transition is disabled
+  // mid-drag via `ws-file-drawer--dragging` so the panel tracks the finger
+  // without easing; clearing the class lets the normal transform-transition
+  // animate the snap/close. The scrim-click-to-close path is untouched.
+  const drawerRef = useRef(null)
+  const dragStart = useRef(null) // { x, y } or null
+
+  const onDrawerTouchStart = useCallback((e) => {
+    if (!open || e.touches.length !== 1) return
+    dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+  }, [open])
+
+  const onDrawerTouchMove = useCallback((e) => {
+    if (!dragStart.current || e.touches.length !== 1) return
+    const dx = e.touches[0].clientX - dragStart.current.x
+    const dy = e.touches[0].clientY - dragStart.current.y
+    if (dx < 0 && Math.abs(dx) > Math.abs(dy) * 1.15) {
+      const el = drawerRef.current
+      if (!el) return
+      el.classList.add('ws-file-drawer--dragging')
+      el.style.transform = `translateX(${Math.max(dx, -el.offsetWidth)}px)`
+    }
+  }, [])
+
+  const onDrawerTouchEnd = useCallback((e) => {
+    if (!dragStart.current) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - dragStart.current.x
+    const dy = t.clientY - dragStart.current.y
+    const shouldClose = dx < -70 && Math.abs(dx) > Math.abs(dy) * 1.35
+    const el = drawerRef.current
+    if (el) {
+      el.classList.remove('ws-file-drawer--dragging')
+      if (shouldClose) {
+        // Animate from the drag position to closed, then clear the inline
+        // transform after the transition so the next open doesn't start from
+        // an inline translateX(-100%) that conflicts with the --open class.
+        el.style.transform = 'translateX(-100%)'
+        const cleanup = () => {
+          if (el) el.style.transform = ''
+          el.removeEventListener('transitionend', cleanup)
+        }
+        el.addEventListener('transitionend', cleanup, { once: true })
+      } else {
+        // Snap back: clearing the inline transform lets the .ws-file-drawer
+        // --open class's translateX(0) take over with the transition running
+        // from the drag position.
+        el.style.transform = ''
+      }
+    }
+    dragStart.current = null
+    if (shouldClose) onClose?.()
+  }, [onClose])
+
+  // touchcancel positions are unreliable across browsers; treat cancel as
+  // "snap back, don't close" — never evaluate the close threshold on cancel.
+  const onDrawerTouchCancel = useCallback(() => {
+    const el = drawerRef.current
+    if (el) {
+      el.classList.remove('ws-file-drawer--dragging')
+      el.style.transform = ''
+    }
+    dragStart.current = null
+  }, [])
+
   const treeItems = useCallback(() => {
     if (!treeRef.current) return []
     return Array.from(treeRef.current.querySelectorAll('[role="treeitem"]'))
@@ -1080,9 +1149,14 @@ function FileNavPanel({
         aria-hidden="true"
       />
       <aside
+        ref={drawerRef}
         className={`ws-file-drawer ${open ? 'ws-file-drawer--open' : ''}`}
         aria-label="File tree"
         aria-hidden={!open}
+        onTouchStart={onDrawerTouchStart}
+        onTouchMove={onDrawerTouchMove}
+        onTouchEnd={onDrawerTouchEnd}
+        onTouchCancel={onDrawerTouchCancel}
       >
         <div className="ws-drawer-head">
           <div>
@@ -2897,16 +2971,25 @@ const CSS = `
   min-height: 44px;
   padding: 0;
   border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg);
+  /* Bare like the shell's .shell__brand logo-toggle: no border, no
+     background box, no focus ring. The always-visible bounding box that
+     used to sit here (border + background) was the owner-reported
+     highlight that lingered after closing the drawer. */
+  border: none;
+  background: none;
   color: var(--text);
   font-size: 16px;
   cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-.ws-nav-toggle:active { background: var(--surface2); }
+.ws-nav-toggle:focus,
+.ws-nav-toggle:focus-visible { outline: none; }
 .ws-top-title {
   min-width: 0;
   display: flex;
@@ -3134,6 +3217,9 @@ const CSS = `
   flex-direction: column;
 }
 .ws-file-drawer--open { transform: translateX(0); }
+/* While the finger drags, kill the transform-transition so the panel tracks
+   the finger 1:1; removing the class lets the snap/close animate normally. */
+.ws-file-drawer--dragging { transition: none; }
 .ws-drawer-head {
   display: flex;
   align-items: center;
