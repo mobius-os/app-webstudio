@@ -1310,7 +1310,7 @@ function ChatPanel({
   }, [storage, systemPrompt])
 
   return (
-    <section className="ws-chat-panel">
+    <section className="ws-chat-panel" aria-label="Agent chat">
       {error && <div className="ws-chat-error">{error}</div>}
       <div className="ws-chat-embed" ref={mountRef} />
     </section>
@@ -1946,6 +1946,9 @@ export default function App({ appId, token }) {
     const minPx = total * (CHAT_MIN_PCT / 100)
     const maxPx = Math.max(minPx, total * (CHAT_MAX_PCT / 100))
 
+    // Capture the pointer on the resizer bar so the drag survives the pointer
+    // crossing the preview iframe (which would otherwise steal the events).
+    event.currentTarget.setPointerCapture(event.pointerId)
     const onMove = (moveEvent) => {
       const nextPx = Math.min(maxPx, Math.max(minPx, startHeight + startY - moveEvent.clientY))
       setChatHeight(Math.min(CHAT_MAX_PCT, Math.max(CHAT_MIN_PCT, (nextPx / total) * 100)))
@@ -2939,6 +2942,7 @@ export default function App({ appId, token }) {
 // app-latex with a `ws-` prefix (keep in sync where divergence isn't needed).
 // ----------------------------------------------------------------------
 const CSS = `
+/* mobius-ui:Root v1 — keep in sync; library candidate. Diverge below the marker only. */
 .ws-root {
   position: relative;
   display: flex;
@@ -2951,8 +2955,11 @@ const CSS = `
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
+  overscroll-behavior: contain;
 }
+/* /mobius-ui:Root */
 
+/* mobius-ui:Toolbar v1 — keep in sync; library candidate. Diverge below the marker only. */
 .ws-top-bar {
   flex: 0 0 auto;
   display: grid;
@@ -2963,6 +2970,7 @@ const CSS = `
   padding: 6px 10px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+  user-select: none;
 }
 .ws-nav-toggle {
   flex: 0 0 auto;
@@ -2982,6 +2990,7 @@ const CSS = `
   cursor: pointer;
   outline: none;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
   -webkit-user-select: none;
   user-select: none;
   display: inline-flex;
@@ -2990,6 +2999,7 @@ const CSS = `
 }
 .ws-nav-toggle:focus,
 .ws-nav-toggle:focus-visible { outline: none; }
+.ws-nav-toggle:active { opacity: 0.7; }
 .ws-top-title {
   min-width: 0;
   display: flex;
@@ -3033,8 +3043,13 @@ const CSS = `
   background: var(--bg);
   color: var(--text);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .ws-icon-btn:active { background: var(--surface2, var(--surface)); }
+@media (hover: hover) {
+  .ws-icon-btn:hover:not(:disabled) { background: var(--surface2, var(--surface)); }
+}
 .ws-icon-btn[aria-pressed="true"] {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
@@ -3045,10 +3060,12 @@ const CSS = `
   border-color: var(--accent);
   color: #062016;
 }
+.ws-icon-btn--primary:active { background: var(--accent-hover, var(--accent)); }
 .ws-icon-btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
+/* /mobius-ui:Toolbar */
 
 /* ---- body: content area + bounded chat, stacked ----
    position: relative so the absolutely-positioned file drawer + its backdrop
@@ -3144,6 +3161,7 @@ const CSS = `
 .ws-build-log {
   max-height: 60vh;
   overflow: auto;
+  overscroll-behavior: contain;
   margin: 0;
   padding: 12px;
   border: 1px solid var(--border);
@@ -3189,6 +3207,7 @@ const CSS = `
   background: #fff;
 }
 
+/* mobius-ui:FileTree v1 — keep in sync; library candidate. Diverge below the marker only. */
 /* ---- file drawer ---- */
 .ws-drawer-scrim {
   position: absolute;
@@ -3227,6 +3246,7 @@ const CSS = `
   min-height: 52px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
+  user-select: none;
 }
 .ws-drawer-title { font-size: 14px; font-weight: 600; color: var(--text); }
 .ws-drawer-count {
@@ -3253,6 +3273,8 @@ const CSS = `
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .ws-drawer-btn:active { background: var(--surface2, var(--surface)); }
 .ws-drawer-btn:disabled { opacity: 0.45; cursor: default; }
@@ -3266,6 +3288,8 @@ const CSS = `
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 8px 0;
+  overscroll-behavior: contain;
+  user-select: none;
 }
 .ws-drawer-empty {
   padding: 16px;
@@ -3297,6 +3321,8 @@ const CSS = `
   font-size: 13px;
   font-family: var(--font);
   outline: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 /* Per-file ⋯ actions button. Faint until the row is hovered/focused so it does
    not compete with the filename; on touch (no hover) it stays visible so the
@@ -3314,6 +3340,8 @@ const CSS = `
   cursor: pointer;
   opacity: 0.5;
   transition: opacity 0.12s ease, color 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .ws-tree-row:hover .ws-tree-menu-btn,
 .ws-tree-menu-btn:focus-visible { opacity: 1; }
@@ -3322,8 +3350,10 @@ const CSS = `
 @media (hover: none) {
   .ws-tree-menu-btn { opacity: 1; }
 }
-.ws-tree-file:hover, .ws-tree-folder:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+@media (hover: hover) {
+  .ws-tree-file:hover, .ws-tree-folder:hover {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
 }
 .ws-tree-file:focus-visible, .ws-tree-folder:focus-visible {
   box-shadow: inset 3px 0 0 var(--accent);
@@ -3361,7 +3391,9 @@ const CSS = `
 .ws-tree-group {
   display: block;
 }
+/* /mobius-ui:FileTree */
 
+/* mobius-ui:ContextMenu v1 — keep in sync; library candidate. Diverge below the marker only. */
 /* In-app context menu (right-click / long-press). position: fixed so its
    left/top (set from the pointer's viewport coords) land exactly under the
    finger regardless of which positioned ancestor it renders inside. */
@@ -3377,6 +3409,7 @@ const CSS = `
   display: flex;
   flex-direction: column;
   gap: 2px;
+  user-select: none;
 }
 .ws-ctx-item {
   display: block;
@@ -3390,9 +3423,12 @@ const CSS = `
   color: var(--text);
   font: 550 13px/1.2 var(--font);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .ws-ctx-item:active { background: var(--surface2, var(--surface)); }
 .ws-ctx-item--danger { color: var(--danger); }
+/* /mobius-ui:ContextMenu */
 /* Bare file/folder glyph — a lucide SVG with no bounding box, fill, or boxed
    padding (matches the shell's icons). It inherits the row's text color so it
    tints to --accent on the selected row exactly like the shell. */
@@ -3417,6 +3453,7 @@ const CSS = `
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* mobius-ui:ChatEmbed v1 — keep in sync; library candidate. Diverge below the marker only. */
 /* ---- chat panel (bottom sheet, bounded height) ----
    The embedded shell chat runs inside an iframe (window.mobius.chat). The
    panel needs a BOUNDED height and the embed needs min-height:0 so the iframe
@@ -3479,7 +3516,9 @@ const CSS = `
   color: var(--text);
   font-size: 12px;
 }
+/* /mobius-ui:ChatEmbed */
 
+/* mobius-ui:Sheet v1 — keep in sync; library candidate. Diverge below the marker only. */
 /* ---- modal ---- */
 .ws-modal-scrim {
   position: absolute;
@@ -3544,7 +3583,10 @@ const CSS = `
   font-weight: 600;
   cursor: pointer;
   font-family: var(--font);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
+.ws-modal-btn:active { opacity: 0.8; }
 .ws-modal-btn--primary {
   background: var(--accent);
   color: #062016;
@@ -3556,7 +3598,9 @@ const CSS = `
   border-color: var(--danger);
 }
 .ws-modal-btn--secondary { background: var(--surface); }
+/* /mobius-ui:Sheet */
 
+/* mobius-ui:SyncPill v1 — keep in sync; library candidate. Diverge below the marker only. */
 /* ---- sync pill ----
    Hidden in the steady state (online + 0 pending); only appears when there's
    something to say. Same shape as the latex + atlas apps so the platform
@@ -3609,4 +3653,5 @@ const CSS = `
   box-shadow: none;
   white-space: nowrap;
 }
+/* /mobius-ui:SyncPill */
 `
