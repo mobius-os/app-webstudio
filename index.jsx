@@ -2097,7 +2097,6 @@ export default function App({ appId, token }) {
   const [mainReady, setMainReady] = useState(false)
   useEffect(() => {
     if (!indexLoaded || mainResolvedRef.current) return
-    mainResolvedRef.current = true
     let cancelled = false
     ;(async () => {
       let stored = null
@@ -2105,7 +2104,12 @@ export default function App({ appId, token }) {
         const m = await (online ? storage.getFresh('main.json') : storage.get('main.json'))
         if (m && typeof m === 'object' && typeof m.path === 'string') stored = m.path
       } catch { /* offline / transient — fall through to default */ }
+      // A connectivity flip mid-flight re-runs this effect. We mark resolved
+      // only AFTER a non-cancelled completion (not at effect entry), so an
+      // interrupted first pass doesn't permanently strip mainPath — and thus
+      // the Build/Preview controls — by leaving mainReady false forever.
       if (cancelled) return
+      mainResolvedRef.current = true
       const list = filesRef.current
       if (stored && list.includes(stored)) {
         setMainPath(stored)
@@ -2292,10 +2296,16 @@ export default function App({ appId, token }) {
       })
     }
 
-    const unsubscribe = storage.subscribeText(path, (body) => {
-      if (typeof body === 'string') applyBody(body)
-      else if (body == null) applyMissing()
-    })
+    // subscribeText is a TEXT-kind read; a managed .json path holds JSON and
+    // must be read with the JSON getter (assertReadKind throws on a wrong-kind
+    // subscribe). For .json we skip the live subscription and rely on the
+    // readLatest() poll below, which uses storage.get + JSON.stringify.
+    const unsubscribe = isManagedJsonPath(path)
+      ? () => {}
+      : storage.subscribeText(path, (body) => {
+        if (typeof body === 'string') applyBody(body)
+        else if (body == null) applyMissing()
+      })
 
     const cachedBody = fileCache[selectedPath]
     let painted = typeof cachedBody === 'string'
@@ -2473,6 +2483,24 @@ export default function App({ appId, token }) {
     if (items.length === 0) return
     const added = []
     const failed = []
+    // An upload writes to files/<rel> directly; without a guard it silently
+    // overwrites an existing same-named file (New file refuses a collision, so
+    // Upload was the only blind clobber). Detect collisions up front and ask
+    // once before overwriting; on decline, skip the colliding paths.
+    const existing = new Set(filesRef.current)
+    const collisions = items
+      .map((f) => `files/${((asFolder && f.webkitRelativePath) || f.name || '').replace(/^\/+/, '').trim()}`)
+      .filter((p) => existing.has(p))
+    let overwrite = true
+    if (collisions.length) {
+      const sample = collisions.slice(0, 6).map((p) => p.replace(/^files\//, ''))
+      overwrite = await modal.confirm(
+        `${collisions.length} file(s) already exist and will be replaced: `
+          + `${sample.join(', ')}${collisions.length > 6 ? '…' : ''}. Overwrite them?`,
+        { title: 'Replace existing files?', danger: true },
+      )
+    }
+    const collisionSet = new Set(collisions)
     for (const f of items) {
       const rel = ((asFolder && f.webkitRelativePath) || f.name || '')
         .replace(/^\/+/, '')
@@ -2482,8 +2510,14 @@ export default function App({ appId, token }) {
         continue
       }
       const path = `files/${rel}`
+      // Skip a colliding path when the user chose not to overwrite.
+      if (!overwrite && collisionSet.has(path)) continue
       try {
-        const isText = /\.(html?|css|js|mjs|ts|jsx|tsx|json|txt|md|csv|svg|xml|webmanifest)$/i.test(rel)
+        // Classify text vs binary by the SAME predicate the editor + preview
+        // use (isBinaryProjectPath / BINARY_FILE_EXTS). A divergent regex here
+        // stored .svg as text yet ImagePreview read it back via getBlob — a
+        // wrong-kind read that left SVG uploads unrenderable.
+        const isText = isTextProjectPath(path)
         if (isText) {
           const text = await f.text()
           await storage.setText(path, text)
@@ -2780,9 +2814,10 @@ export default function App({ appId, token }) {
     if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'].includes(selectedExt)) {
       return <ImagePreview storage={storage} path={selectedPath} />
     }
-    // Preview mode (only reachable for .html selections via the toggle) shows
-    // the MAIN page's built site.
-    if (selectedIsHtml && viewMode === 'preview') {
+    // Preview mode shows the MAIN page's built site, so it is only rendered
+    // when the OPEN file IS the main page — matching showHtmlControls, so the
+    // preview never paints a different page than the one on screen.
+    if (selectedPath === mainPath && viewMode === 'preview') {
       return renderPreviewView()
     }
     if (fileLoading) return <div className="ws-preview-note">Loading source…</div>
@@ -2815,9 +2850,14 @@ export default function App({ appId, token }) {
     )
   }
 
-  // The Preview view shows the MAIN page's output, so the [Source | Preview]
-  // toggle and Build are meaningful while an .html is open.
-  const showHtmlControls = selectedIsHtml && hasMain
+  // The Preview view + Build always operate on the MAIN page. We therefore
+  // only offer the [Source | Preview] toggle and Build when the OPEN file IS
+  // the main page — otherwise "Show preview" on a non-main .html would render
+  // a DIFFERENT page than the one on screen (the misleading affordance the
+  // reviewer flagged). For a non-main .html the user picks "Set as main page"
+  // from the drawer first. (selectedPath === mainPath implies html + hasMain,
+  // since mainPath is only ever set to an isHtmlDoc path.)
+  const showHtmlControls = !!mainPath && selectedPath === mainPath
   const openName = selectedPath ? selectedPath.replace(/^files\//, '') : null
 
   return (
