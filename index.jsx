@@ -2894,21 +2894,34 @@ export default function App({ appId, token }) {
         <div className="ws-top-actions">
           {showHtmlControls && (
             <>
-              {/* One icon toggles between the source editor and the live
-                  preview; its glyph names the destination (eye = show preview,
-                  code = back to source). */}
+              {/* Segmented [Source | Preview] toggle with visible text labels —
+                  the two most important view states named, not an ambiguous
+                  eye/code glyph. role=group + aria-pressed exposes the active
+                  segment to assistive tech. */}
+              <div className="ws-seg" role="group" aria-label="View mode">
+                <button
+                  type="button"
+                  className="ws-seg-btn"
+                  aria-pressed={viewMode !== 'preview'}
+                  title="Show source"
+                  onClick={() => setViewMode('source')}
+                >
+                  <CodeIcon size={16} />
+                  <span className="ws-seg-label">Source</span>
+                </button>
+                <button
+                  type="button"
+                  className="ws-seg-btn"
+                  aria-pressed={viewMode === 'preview'}
+                  title="Show preview"
+                  onClick={() => setViewMode('preview')}
+                >
+                  <EyeIcon size={16} />
+                  <span className="ws-seg-label">Preview</span>
+                </button>
+              </div>
               <button
-                type="button"
-                className="ws-icon-btn"
-                aria-pressed={viewMode === 'preview'}
-                aria-label={viewMode === 'preview' ? 'Show source' : 'Show preview'}
-                title={viewMode === 'preview' ? 'Show source' : 'Show preview'}
-                onClick={() => setViewMode((m) => (m === 'preview' ? 'source' : 'preview'))}
-              >
-                {viewMode === 'preview' ? <CodeIcon /> : <EyeIcon />}
-              </button>
-              <button
-                className="ws-icon-btn ws-icon-btn--primary"
+                className="ws-icon-btn ws-icon-btn--primary ws-build-btn"
                 onClick={handleBuild}
                 disabled={build.buildStatus === 'building'}
                 aria-label={`Build and preview the main page (${mainPath.replace(/^files\//, '')})`}
@@ -2916,7 +2929,10 @@ export default function App({ appId, token }) {
                   ? 'Building…'
                   : `Build + preview ${mainPath.replace(/^files\//, '')}`}
               >
-                <PlayIcon />
+                <PlayIcon size={16} />
+                <span className="ws-build-label">
+                  {build.buildStatus === 'building' ? 'Building…' : 'Build'}
+                </span>
               </button>
             </>
           )}
@@ -2989,6 +3005,12 @@ const CSS = `
   flex-direction: column;
   height: 100%;
   width: 100%;
+  /* Overlay scrims + shadows as local tokens so the raw rgba(0,0,0,…) values
+     live in one place (and read against the dark theme rather than being
+     scattered literals). */
+  --ws-scrim: rgba(0, 0, 0, 0.45);
+  --ws-scrim-soft: rgba(0, 0, 0, 0.35);
+  --ws-shadow: rgba(0, 0, 0, 0.3);
   background: var(--bg, #111614);
   color: var(--text, #eef7f1);
   font-family: var(--font, Inter, ui-sans-serif, system-ui, sans-serif);
@@ -2999,6 +3021,13 @@ const CSS = `
 }
 /* /mobius-ui:Root */
 
+/* mobius-ui:Focus v1 -- shared keyboard focus ring (WCAG 2.4.7); never bare outline:none */
+:where(button,a,input,textarea,select,summary,[role="button"],[tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* /mobius-ui:Focus */
+
 /* mobius-ui:Toolbar v1 — keep in sync; library candidate. Diverge below the marker only. */
 .ws-top-bar {
   flex: 0 0 auto;
@@ -3007,7 +3036,9 @@ const CSS = `
   align-items: center;
   gap: 10px;
   min-height: 48px;
-  padding: 6px 10px;
+  /* Top-pinned bar: clear the iPhone notch / Dynamic Island and pad the sides
+     past the rounded-corner / gesture insets on a full-screen PWA. */
+  padding: max(6px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left));
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   user-select: none;
@@ -3028,7 +3059,6 @@ const CSS = `
   color: var(--text);
   font-size: 16px;
   cursor: pointer;
-  outline: none;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   -webkit-user-select: none;
@@ -3037,8 +3067,10 @@ const CSS = `
   align-items: center;
   justify-content: center;
 }
-.ws-nav-toggle:focus,
-.ws-nav-toggle:focus-visible { outline: none; }
+/* Suppress only the UA mouse-focus outline (the owner-reported lingering box
+   after closing the drawer); keyboard focus still gets the shared :focus-visible
+   ring so a tabbing user sees where they are. */
+.ws-nav-toggle:focus:not(:focus-visible) { outline: none; }
 .ws-nav-toggle:active { opacity: 0.7; }
 .ws-top-title {
   min-width: 0;
@@ -3104,6 +3136,56 @@ const CSS = `
 .ws-icon-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+/* Segmented [Source | Preview] view toggle — one bordered group, the active
+   segment tinted like an aria-pressed icon button. Each segment keeps a 44px
+   tap height; labels read in the body font, icons sized to match. */
+.ws-seg {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.ws-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: 600 13px/1 var(--font);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.ws-seg-btn + .ws-seg-btn { border-left: 1px solid var(--border); }
+.ws-seg-btn:active { background: var(--surface2, var(--surface)); }
+@media (hover: hover) {
+  .ws-seg-btn:hover { color: var(--text); background: var(--surface2, var(--surface)); }
+}
+.ws-seg-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+/* Build is the primary action: an auto-width accent button with a visible
+   "Build" label beside the play glyph, not an ambiguous icon. */
+.ws-build-btn {
+  width: auto;
+  gap: 7px;
+  padding: 0 14px;
+}
+.ws-build-label { font: 600 13px/1 var(--font); }
+/* Narrow phones: drop the segment text so the bar stays single-line, but keep
+   the Build label (the primary action stays named). */
+@media (max-width: 420px) {
+  .ws-seg-label { display: none; }
+  .ws-seg-btn { padding: 0 12px; }
 }
 /* /mobius-ui:Toolbar */
 
@@ -3222,14 +3304,16 @@ const CSS = `
 }
 
 /* ---- html preview (in-app browser) ----
-   The built site renders inside a sandboxed iframe via srcdoc. White
-   backdrop behind it because most generated pages assume a light page. */
+   The built site renders inside a sandboxed iframe via srcdoc. The iframe
+   itself keeps a white backdrop (most generated pages assume a light page),
+   but the area BEHIND it stays the calm dark --surface2 so there is no hard
+   white slab between builds; the iframe fades in over it (see below). */
 .ws-preview {
   position: relative;
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background: #fff;
+  background: var(--surface2, var(--surface));
 }
 .ws-preview .ws-preview-note {
   position: absolute;
@@ -3239,12 +3323,16 @@ const CSS = `
   justify-content: center;
   background: var(--surface2, var(--surface));
 }
+/* Gentle fade so the white page eases in over the dark chrome instead of
+   popping on every Build/refresh (the reduced-motion guard neutralizes it). */
+@keyframes ws-preview-in { from { opacity: 0; } to { opacity: 1; } }
 .ws-preview-frame {
   display: block;
   width: 100%;
   height: 100%;
   border: 0;
   background: #fff;
+  animation: ws-preview-in 0.18s ease both;
 }
 
 /* mobius-ui:FileTree v1 — keep in sync; library candidate. Diverge below the marker only. */
@@ -3252,7 +3340,7 @@ const CSS = `
 .ws-drawer-scrim {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--ws-scrim-soft);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s ease;
@@ -3360,10 +3448,12 @@ const CSS = `
   cursor: pointer;
   font-size: 13px;
   font-family: var(--font);
-  outline: none;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
+/* Mouse-focus only: keyboard focus keeps the custom inset-accent ring below. */
+.ws-tree-file:focus:not(:focus-visible),
+.ws-tree-folder:focus:not(:focus-visible) { outline: none; }
 /* Per-file ⋯ actions button. Faint until the row is hovered/focused so it does
    not compete with the filename; on touch (no hover) it stays visible so the
    actions are discoverable without a long-press. */
@@ -3445,7 +3535,7 @@ const CSS = `
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 28px var(--ws-scrim-soft);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -3511,6 +3601,9 @@ const CSS = `
   flex-direction: column;
   background: var(--surface);
   border-top: 1px solid var(--border);
+  /* Bottom-pinned sheet: lift the embedded chat composer above the iPhone
+     home-indicator / Android gesture bar on a full-screen PWA. */
+  padding-bottom: env(safe-area-inset-bottom);
 }
 .ws-chat-resizer {
   flex: 0 0 9px;
@@ -3526,8 +3619,10 @@ const CSS = `
 .ws-chat-resizer:hover,
 .ws-chat-resizer:focus-visible {
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-  outline: none;
 }
+/* The 9px-tall separator is a thin line with a fat hit area; the shared
+   :focus-visible ring sits flush inside it, so pull the offset in. */
+.ws-chat-resizer:focus-visible { outline-offset: -2px; }
 .ws-chat-resizer-bar {
   width: 44px;
   height: 3px;
@@ -3566,7 +3661,7 @@ const CSS = `
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--ws-scrim);
   z-index: 50;
   padding: 16px;
 }
@@ -3575,7 +3670,7 @@ const CSS = `
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 8px 32px var(--ws-shadow);
   width: 100%;
   max-width: 360px;
   padding: 18px 20px;
@@ -3602,10 +3697,12 @@ const CSS = `
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  outline: none;
   margin-bottom: 14px;
   box-sizing: border-box;
 }
+/* Mouse/programmatic focus keeps just the accent border below; keyboard focus
+   additionally gets the shared :focus-visible ring. */
+.ws-modal-input:focus:not(:focus-visible) { outline: none; }
 .ws-modal-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .ws-modal-actions {
   display: flex;
@@ -3647,8 +3744,10 @@ const CSS = `
    feels coherent. */
 .ws-sync-pill {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
+  /* Floating default (un-floated to static in the header below): keep the pill
+     clear of the iPhone home-indicator / Android gesture bar. */
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -3662,7 +3761,7 @@ const CSS = `
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   z-index: 40;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 2px 8px var(--ws-shadow);
   pointer-events: auto;
 }
 .ws-sync-pill-dot {
@@ -3694,4 +3793,15 @@ const CSS = `
   white-space: nowrap;
 }
 /* /mobius-ui:SyncPill */
+
+/* mobius-ui:ReducedMotion v1 -- honor the OS reduce-motion setting */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+/* /mobius-ui:ReducedMotion */
 `
