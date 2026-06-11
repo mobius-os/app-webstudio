@@ -118,20 +118,22 @@ export function normalizeFileCacheSnapshot(parsed) {
 // ----------------------------------------------------------------------
 // Web Studio mini-app for Möbius — a VSCode-shaped website builder.
 //
-// Layout (mobile-first):
-//   - Top bar: the app logo (toggles the left file drawer) · the open file's name
-//     (+ a "main" badge if it's the page Build renders) · a segmented
-//     [Source | Preview] toggle and a primary Build button (both for the
-//     HTML entry).
+// Layout (mobile-first; the top bar + chat split are kept structurally
+// IDENTICAL to app-latex):
+//   - Top bar, three zones: LEFT = the app logo (toggles the left file
+//     drawer) + the open file's name; CENTER = the chat toggle; RIGHT = a
+//     [Source | Preview] view toggle and a play-triangle Build button (both
+//     for the HTML entry; each icon button carries an aria-label + title).
 //   - Left drawer: slides in over a backdrop from the left edge — the
 //     file tree + New file/folder/Upload + per-file context actions
 //     (rename / delete / set-as-main). Tapping a file or the backdrop
 //     closes it.
 //   - Main area: the SOURCE editor (CodeMirror, plain-text mode) OR the built
 //     site (a sandboxed iframe), toggled. Images render inline.
-//   - Chat: a bottom panel with a bounded height so the embedded agent
-//     conversation + composer stay fully visible and scrollable. The
-//     user describes the site in prose; the sub-agent edits files in
+//   - Chat: toggled from the top bar. Opening it splits the body 50/50 —
+//     content above, a slim draggable divider in the middle, the embedded
+//     agent chat below (composer pinned to the panel bottom). The user
+//     describes the site in prose; the sub-agent edits files in
 //     /data/apps/<id>/files/ via the Edit and Write tools.
 //
 // Storage layout (under /api/storage/apps/<id>/, pure app storage —
@@ -314,10 +316,13 @@ function ImagePreview({ storage, path }) {
 // HTML preview — the in-app browser (replaces LaTeX's pdf.js canvas).
 //
 // After a successful build we render the built page inside a SANDBOXED
-// iframe via `srcdoc`. The sandbox grants `allow-scripts allow-popups`
-// only — NOT allow-same-origin (so the generated site can't read this
-// app's localStorage / token or hit /api), NOT allow-modals (untrusted
-// generated HTML shouldn't be able to alert/confirm-spam).
+// iframe via `srcdoc`. The sandbox grants `allow-scripts allow-popups
+// allow-popups-to-escape-sandbox` only — NOT allow-same-origin (so the
+// generated site can't read this app's localStorage / token or hit /api),
+// NOT allow-modals (untrusted generated HTML shouldn't be able to
+// alert/confirm-spam). allow-popups-to-escape-sandbox exists for external
+// links: without it a target=_blank tab would INHERIT the sandbox and the
+// external site would load with no same-origin (broken cookies/storage).
 //
 // Because there's no same-origin and no server route for build/site/,
 // a plain `<a href>`/`<link href>`/`<script src>` inside the srcdoc has
@@ -327,9 +332,21 @@ function ImagePreview({ storage, path }) {
 // any origin. CSS is inlined into a <style>; JS into a blob-URL <script>;
 // images/fonts into blob URLs; url() refs inside inline styles rewritten.
 //
+// Links inside the preview:
+//   - same-site links to another BUILT PAGE (about.html, sub/, /pricing.html)
+//     navigate WITHIN the preview: a tiny injected script preventDefaults the
+//     click and postMessages the resolved build/site/ path up to this
+//     component, which re-renders the preview at that page (srcdoc can't
+//     resolve relative navigation natively — there is no base URL).
+//   - external links (http/https or //) get target=_blank rel=noopener
+//     injected so they open in a NEW TAB instead of navigating (and killing)
+//     the srcdoc preview.
+//   - same-site links to a non-page asset are neutralised (inert click)
+//     rather than left to jump to a broken about:srcdoc URL.
+//
 // `version` (the build token) is in the deps so a rebuild that produces
 // the SAME deterministic entry path still refetches + re-renders the
-// fresh bytes.
+// fresh bytes (and resets any in-preview navigation back to the entry).
 // ----------------------------------------------------------------------
 
 // Resolve an asset reference (possibly relative, ./ or bare) against the
@@ -372,11 +389,46 @@ function resolveSiteAsset(ref, entryPath) {
 
 const PREVIEW_TEXT_EXTS = new Set(['css', 'js', 'mjs', 'json', 'svg'])
 
+// In-preview page navigation: the injected click handler postMessages the
+// resolved build/site/ path of a same-site page link up to HtmlPreview.
+const WS_PREVIEW_NAV_TYPE = 'ws-preview-nav'
+const WS_PREVIEW_NAV_SCRIPT = `
+document.addEventListener('click', function (event) {
+  var link = event.target && event.target.closest ? event.target.closest('a[data-ws-internal]') : null
+  if (!link) return
+  event.preventDefault()
+  window.parent.postMessage({ type: '${WS_PREVIEW_NAV_TYPE}', path: link.getAttribute('data-ws-internal') }, '*')
+}, true)
+`
+
 function HtmlPreview({ storage, entryPath, version }) {
   const [srcDoc, setSrcDoc] = useState(null)
   const [err, setErr] = useState(null)
   const [loading, setLoading] = useState(true)
   const createdUrlsRef = useRef([])
+  const frameRef = useRef(null)
+  // The page currently shown — starts at the build's entry and changes when
+  // the user follows a same-site page link inside the preview. A new build
+  // (version) or a different entry resets it.
+  const [pageEntry, setPageEntry] = useState(entryPath)
+  useEffect(() => { setPageEntry(entryPath) }, [entryPath, version])
+
+  // Accept navigation messages only from OUR iframe, and only to paths we
+  // stamped at injection time (under build/site/, structurally safe).
+  useEffect(() => {
+    const onMessage = (event) => {
+      const frame = frameRef.current
+      if (!frame || event.source !== frame.contentWindow) return
+      const data = event.data
+      if (!data || data.type !== WS_PREVIEW_NAV_TYPE) return
+      const next = typeof data.path === 'string' ? data.path : ''
+      if (!next.startsWith('build/site/')) return
+      if (!isSafeRelPath(next.slice('build/site/'.length))) return
+      setPageEntry(next)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -416,7 +468,7 @@ function HtmlPreview({ storage, entryPath, version }) {
       // rewriting img/a.png would also hit img/a.png.webp.
       const map = new Map()
       for (const ref of refs) {
-        const sitePath = resolveSiteAsset(ref, entryPath)
+        const sitePath = resolveSiteAsset(ref, pageEntry)
         if (!sitePath) continue
         try {
           const url = await blobUrlFor(sitePath)
@@ -432,7 +484,7 @@ function HtmlPreview({ storage, entryPath, version }) {
 
     ;(async () => {
       try {
-        const html = await storage.getText(entryPath)
+        const html = await storage.getText(pageEntry)
         if (cancelled) return
         if (html == null) throw new Error('Built page could not be loaded. Try Build again.')
 
@@ -443,7 +495,7 @@ function HtmlPreview({ storage, entryPath, version }) {
         // <link rel="stylesheet" href="..."> → inline <style> (with its own
         // url() refs rewritten). Same-build only; external CDN links stay.
         for (const link of Array.from(doc.querySelectorAll('link[rel~="stylesheet"][href]'))) {
-          const sitePath = resolveSiteAsset(link.getAttribute('href'), entryPath)
+          const sitePath = resolveSiteAsset(link.getAttribute('href'), pageEntry)
           if (!sitePath) continue
           try {
             const css = await textFor(sitePath)
@@ -464,7 +516,7 @@ function HtmlPreview({ storage, entryPath, version }) {
         // <script src="..."> → fetch the JS, re-point src at a blob URL so it
         // executes inside the sandbox (a relative src has no origin to resolve).
         for (const script of Array.from(doc.querySelectorAll('script[src]'))) {
-          const sitePath = resolveSiteAsset(script.getAttribute('src'), entryPath)
+          const sitePath = resolveSiteAsset(script.getAttribute('src'), pageEntry)
           if (!sitePath) continue
           try {
             const js = await textFor(sitePath)
@@ -489,7 +541,7 @@ function HtmlPreview({ storage, entryPath, version }) {
             // srcset is a comma-separated list; only single refs are handled
             // here (best-effort — a multi-candidate srcset is left untouched).
             if (attr === 'srcset' && val && val.includes(',')) continue
-            const sitePath = resolveSiteAsset(val, entryPath)
+            const sitePath = resolveSiteAsset(val, pageEntry)
             if (!sitePath) continue
             try {
               const url = await blobUrlFor(sitePath)
@@ -499,17 +551,52 @@ function HtmlPreview({ storage, entryPath, version }) {
           }
         }
 
-        // <a href="page.html"> to a SEPARATE in-site page can't navigate inside
-        // a srcdoc (v1 is single-page) — neutralise it so a click is an inert
-        // no-op rather than a broken jump to about:srcdoc. External links and
-        // in-page anchors are untouched.
+        // <a href> handling — three cases:
+        //   external (http/https or //)      → open a NEW TAB (target=_blank
+        //                                      rel=noopener); a plain click
+        //                                      would navigate (and kill) the
+        //                                      srcdoc preview.
+        //   same-site link to a built PAGE   → data-ws-internal=<resolved
+        //                                      build/site/ path>; the injected
+        //                                      script preventDefaults + post-
+        //                                      Messages it so the preview
+        //                                      navigates to that page. href is
+        //                                      kept so the link still styles.
+        //   same-site link to a non-page     → neutralised (no href) so the
+        //                                      click is inert rather than a
+        //                                      broken jump to about:srcdoc.
+        // In-page anchors (#...), mailto:/tel: etc. are untouched.
+        const navTargetFor = (ref) => {
+          const sitePath = resolveSiteAsset(ref, pageEntry)
+          if (!sitePath) return null
+          const lower = sitePath.toLowerCase()
+          if (lower.endsWith('.html') || lower.endsWith('.htm')) return sitePath
+          // Directory-shaped refs (about/, /docs) resolve to their index page.
+          const leaf = sitePath.slice(sitePath.lastIndexOf('/') + 1)
+          if (!leaf.includes('.')) return `${sitePath}/index.html`
+          return null
+        }
         for (const a of Array.from(doc.querySelectorAll('a[href]'))) {
-          const sitePath = resolveSiteAsset(a.getAttribute('href'), entryPath)
-          if (sitePath) {
-            a.setAttribute('data-ws-internal', a.getAttribute('href'))
+          const href = (a.getAttribute('href') || '').trim()
+          if (/^(?:https?:)?\/\//i.test(href)) {
+            a.setAttribute('target', '_blank')
+            a.setAttribute('rel', 'noopener noreferrer')
+            continue
+          }
+          const navTarget = navTargetFor(href)
+          if (navTarget) {
+            a.setAttribute('data-ws-internal', navTarget)
+            continue
+          }
+          if (resolveSiteAsset(href, pageEntry)) {
+            a.setAttribute('data-ws-asset', href)
             a.removeAttribute('href')
           }
         }
+        // The click interceptor for data-ws-internal links (see above).
+        const navScript = doc.createElement('script')
+        navScript.textContent = WS_PREVIEW_NAV_SCRIPT
+        ;(doc.body || doc.documentElement).appendChild(navScript)
 
         if (cancelled) return
         const serialized = `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`
@@ -524,7 +611,7 @@ function HtmlPreview({ storage, entryPath, version }) {
     })()
 
     return () => { cancelled = true }
-  }, [storage, entryPath, version])
+  }, [storage, pageEntry, version])
 
   // Revoke blob URLs on unmount.
   useEffect(() => () => {
@@ -538,9 +625,10 @@ function HtmlPreview({ storage, entryPath, version }) {
       {loading && <div className="ws-preview-note">Rendering preview…</div>}
       {srcDoc != null && (
         <iframe
+          ref={frameRef}
           className="ws-preview-frame"
           title="Site preview"
-          sandbox="allow-scripts allow-popups"
+          sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
           srcDoc={srcDoc}
         />
       )}
@@ -668,6 +756,9 @@ function CodeIcon({ size = 20 }) {
     </svg>
   )
 }
+// Play triangle for the Build action — same component as LaTeX's, so the two
+// editor-shaped apps share one primary-action icon.
+/* mobius-ui:PlayIcon v1 — keep in sync with app-latex */
 function PlayIcon({ size = 20 }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
@@ -677,22 +768,12 @@ function PlayIcon({ size = 20 }) {
     </svg>
   )
 }
-// Hammer icon for the Build action (lucide-style, fill none, round caps).
-function HammerIcon({ size = 18 }) {
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
-      strokeLinejoin="round" aria-hidden>
-      <path d="m15 12-8.5 8.5a2.12 2.12 0 0 1-3-3L12 9" />
-      <path d="M17.64 15 22 10.64" />
-      <path d="m2 2 4.5 4.5" />
-      <path d="M14 6.84 20.16 13 22 11.16 15.84 5 14 6.84z" />
-    </svg>
-  )
-}
-// Spinning dots indicator for "Building…" state (pure CSS animation, no keyframes needed —
-// we use a CSS class on the icon wrapper).
-function BuildingIndicator({ size = 18 }) {
+/* /mobius-ui:PlayIcon */
+
+// Spinner shown in the Build button while a build runs (CSS animation on
+// .ws-building-spin). Same component as LaTeX's.
+/* mobius-ui:BuildingIndicator v1 — keep in sync with app-latex */
+function BuildingIndicator({ size = 20 }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
       stroke="currentColor" strokeWidth="2" strokeLinecap="round"
@@ -701,6 +782,7 @@ function BuildingIndicator({ size = 18 }) {
     </svg>
   )
 }
+/* /mobius-ui:BuildingIndicator */
 function KebabIcon({ size = 18 }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
@@ -1979,10 +2061,9 @@ export default function App({ appId, token }) {
 
   const toggleChat = useCallback(() => {
     setChatOpen((open) => {
-      if (!open) {
-        // Turning on: reset ratio to 0.5 if it was near-zero
-        setChatRatio((r) => (r <= 0.01 ? 0.5 : r))
-      }
+      // Turning on always spawns a 50/50 split — the divider in the middle —
+      // regardless of where a previous drag left it (owner spec).
+      if (!open) setChatRatio(0.5)
       return !open
     })
   }, [])
@@ -2938,95 +3019,101 @@ export default function App({ appId, token }) {
   return (
     <div className="ws-root">
       <style>{CSS}</style>
+      {/* Three-zone top bar: left = drawer toggle + open filename, center =
+          the chat toggle, right = view toggle + Build (+ sync pill). The grid
+          is 1fr auto 1fr so the chat toggle sits in the visual centre of the
+          bar. Identical structure in app-latex (unprefixed classes). */}
       <header className="ws-top-bar">
-        {/* The app's own logo is the drawer toggle, mirroring the Möbius shell
-            header where the logo (not a hamburger) opens the drawer. */}
-        <button
-          ref={navToggleRef}
-          className="ws-nav-toggle"
-          onClick={toggleNav}
-          aria-label={navOpen ? 'Close file drawer' : 'Open file drawer'}
-          aria-expanded={navOpen}
-        >
-          {iconBroken ? (
-            '☰'
-          ) : (
-            <img
-              src={`/api/apps/${appId}/icon`}
-              width={28}
-              height={28}
-              alt=""
-              style={{ borderRadius: 6, display: 'block' }}
-              onError={() => setIconBroken(true)}
-            />
-          )}
-        </button>
-        <div className="ws-top-title">
-          {openName
-            ? <span className="ws-top-path" title={selectedPath}>{openName}</span>
-            : <span className="ws-top-path ws-top-path--muted">No file open</span>}
+        <div className="ws-top-zone ws-top-zone--left">
+          {/* The app's own logo is the drawer toggle, mirroring the Möbius shell
+              header where the logo (not a hamburger) opens the drawer. */}
+          <button
+            ref={navToggleRef}
+            className="ws-nav-toggle"
+            onClick={toggleNav}
+            aria-label={navOpen ? 'Close file drawer' : 'Open file drawer'}
+            aria-expanded={navOpen}
+          >
+            {iconBroken ? (
+              '☰'
+            ) : (
+              <img
+                src={`/api/apps/${appId}/icon`}
+                width={28}
+                height={28}
+                alt=""
+                style={{ borderRadius: 6, display: 'block' }}
+                onError={() => setIconBroken(true)}
+              />
+            )}
+          </button>
+          <div className="ws-top-title">
+            {openName
+              ? <span className="ws-top-path" title={selectedPath}>{openName}</span>
+              : <span className="ws-top-path ws-top-path--muted">No file open</span>}
+          </div>
         </div>
-        <div className="ws-top-actions">
-          {showHtmlControls && (
-            <>
-              {/* Icon-only [Source | Preview] toggle. role=group + aria-pressed exposes
-                  the active segment to assistive tech; title + aria-label name the action. */}
-              <div className="ws-seg" role="group" aria-label="View mode">
-                <button
-                  type="button"
-                  className="ws-seg-btn"
-                  aria-pressed={viewMode !== 'preview'}
-                  aria-label="Source view"
-                  title="Source"
-                  onClick={() => setViewMode('source')}
-                >
-                  <CodeIcon size={17} />
-                </button>
-                <button
-                  type="button"
-                  className="ws-seg-btn"
-                  aria-pressed={viewMode === 'preview'}
-                  aria-label="Preview"
-                  title="Preview"
-                  onClick={() => setViewMode('preview')}
-                >
-                  <EyeIcon size={17} />
-                </button>
-              </div>
-              <button
-                className="ws-icon-btn ws-icon-btn--primary"
-                onClick={handleBuild}
-                disabled={build.buildStatus === 'building'}
-                aria-label={build.buildStatus === 'building'
-                  ? 'Building…'
-                  : `Build ${mainPath.replace(/^files\//, '')}`}
-                title={build.buildStatus === 'building'
-                  ? 'Building…'
-                  : `Build ${mainPath.replace(/^files\//, '')}`}
-              >
-                {build.buildStatus === 'building'
-                  ? <BuildingIndicator size={17} />
-                  : <HammerIcon size={17} />}
-              </button>
-            </>
-          )}
+        <div className="ws-top-zone ws-top-zone--center">
           <button
             type="button"
-            className="ws-icon-btn ws-chat-toggle"
+            className="ws-toolbar-btn ws-chat-toggle-btn"
             aria-label={chatOpen ? 'Close chat' : 'Open chat'}
             aria-pressed={chatOpen}
             title={chatOpen ? 'Close chat' : 'Open chat'}
             onClick={toggleChat}
           >
-            <ChatBubbleIcon size={17} />
+            <ChatBubbleIcon size={20} />
           </button>
+        </div>
+        <div className="ws-top-zone ws-top-zone--right">
+          {showHtmlControls && (
+            <>
+              {/* Icon-only [Source | Preview] toggle. role=group + aria-pressed exposes
+                  the active segment to assistive tech; title + aria-label name the action. */}
+              <div className="ws-seg-toggle" role="group" aria-label="View">
+                <button
+                  type="button"
+                  className={`ws-seg-btn ${viewMode !== 'preview' ? 'ws-seg-btn--active' : ''}`}
+                  aria-pressed={viewMode !== 'preview'}
+                  aria-label="Source"
+                  title="Source"
+                  onClick={() => setViewMode('source')}
+                >
+                  <CodeIcon size={20} />
+                </button>
+                <button
+                  type="button"
+                  className={`ws-seg-btn ${viewMode === 'preview' ? 'ws-seg-btn--active' : ''}`}
+                  aria-pressed={viewMode === 'preview'}
+                  aria-label="Preview"
+                  title="Preview"
+                  onClick={() => setViewMode('preview')}
+                >
+                  <EyeIcon size={20} />
+                </button>
+              </div>
+              <button
+                className="ws-toolbar-btn ws-toolbar-btn--primary"
+                onClick={handleBuild}
+                disabled={build.buildStatus === 'building'}
+                aria-label={build.buildStatus === 'building' ? 'Building…' : 'Build'}
+                title={build.buildStatus === 'building'
+                  ? 'Building…'
+                  : `Build ${mainPath.replace(/^files\//, '')}`}
+              >
+                {build.buildStatus === 'building'
+                  ? <BuildingIndicator size={20} />
+                  : <PlayIcon size={20} />}
+              </button>
+            </>
+          )}
           <SyncPill online={online} pending={pending} hasRuntime={storage.hasRuntime} />
         </div>
       </header>
 
       <div
         ref={bodyRef}
-        className="ws-body"
+        className={chatOpen ? 'ws-body ws-body--chat-open' : 'ws-body'}
         style={chatOpen ? { '--ws-chat-ratio': chatRatio } : undefined}
       >
         <FileNavPanel
@@ -3050,7 +3137,7 @@ export default function App({ appId, token }) {
         />
         {chatOpen ? (
           <>
-            <main className="ws-content ws-content--flex" style={{ flex: `${1 - chatRatio} 1 0`, minHeight: 0 }}>{renderMain()}</main>
+            <main className="ws-content">{renderMain()}</main>
             <div
               className="ws-chat-divider"
               role="separator"
@@ -3120,13 +3207,15 @@ const CSS = `
 }
 /* /mobius-ui:Focus */
 
-/* mobius-ui:Toolbar v1 — keep in sync; library candidate. Diverge below the marker only. */
+/* mobius-ui:Toolbar v1 — keep in sync with app-latex (unprefixed) */
+/* Three-zone bar: 1fr | auto | 1fr puts the centre zone (the chat toggle) in
+   the visual middle of the bar; the side zones flex + truncate. */
 .ws-top-bar {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 48px;
   /* Top-pinned bar: clear the iPhone notch / Dynamic Island and pad the sides
      past the rounded-corner / gesture insets on a full-screen PWA. */
@@ -3135,6 +3224,15 @@ const CSS = `
   border-bottom: 1px solid var(--border);
   user-select: none;
 }
+.ws-top-zone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ws-top-zone--left { justify-content: flex-start; }
+.ws-top-zone--center { flex: 0 0 auto; justify-content: center; }
+.ws-top-zone--right { justify-content: flex-end; }
 .ws-nav-toggle {
   flex: 0 0 auto;
   width: 44px;
@@ -3168,7 +3266,6 @@ const CSS = `
   min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
   font-size: 13px;
   font-weight: 600;
@@ -3184,21 +3281,13 @@ const CSS = `
   text-overflow: ellipsis;
 }
 .ws-top-path--muted { color: var(--muted); font-weight: 400; }
-.ws-top-actions {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  min-width: 0;
-}
-/* ---- single-line icon toolbar (eye toggle + play Build) ----
-   Square 44x44 tap targets so the whole bar — filename, view toggle, Build —
-   stays on one line even on a narrow phone. */
-.ws-icon-btn {
-  flex: 0 0 auto;
+/* Icon-only toolbar buttons: square 44x44 tap targets (same recipe as
+   app-latex's .toolbar-btn). */
+.ws-toolbar-btn {
   width: 44px;
   height: 44px;
   min-height: 44px;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3210,74 +3299,64 @@ const CSS = `
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
-.ws-icon-btn:active { background: var(--surface2, var(--surface)); }
-@media (hover: hover) {
-  .ws-icon-btn:hover:not(:disabled) { background: var(--surface2, var(--surface)); }
-}
-.ws-icon-btn[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  color: var(--accent);
-}
-.ws-icon-btn--primary {
+.ws-toolbar-btn--primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #062016;
 }
-.ws-icon-btn--primary:active { background: var(--accent-hover, var(--accent)); }
-.ws-icon-btn:disabled {
+.ws-toolbar-btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
-/* Segmented [Source | Preview] view toggle — one bordered group, the active
-   segment tinted like an aria-pressed icon button. Each segment keeps a 44px
-   tap height; labels read in the body font, icons sized to match. */
-.ws-seg {
-  flex: 0 0 auto;
+.ws-toolbar-btn:active { background: var(--surface2, var(--surface)); }
+.ws-toolbar-btn--primary:active { background: color-mix(in srgb, var(--accent) 80%, #000); }
+@media (hover: hover) {
+  .ws-toolbar-btn:hover:not(:disabled) { background: var(--surface2, var(--surface)); }
+  .ws-toolbar-btn--primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, #000); }
+}
+.ws-chat-toggle-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+/* Build-button spinner (BuildingIndicator) — same recipe as app-latex. */
+@keyframes ws-building-spin { to { transform: rotate(360deg); } }
+.ws-building-spin {
+  animation: ws-building-spin 1.1s linear infinite;
+  transform-origin: center;
+}
+
+/* ---- source/preview view toggle: bare icon buttons (same recipe as
+   app-latex's .seg-toggle — no pill container; the active button carries
+   the accent tint). ---- */
+.ws-seg-toggle {
   display: inline-flex;
-  align-items: stretch;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--bg);
+  flex: 0 0 auto;
+  gap: 6px;
 }
 .ws-seg-btn {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 44px;
-  padding: 0 12px;
-  border: none;
-  background: none;
-  color: var(--muted);
-  font: 600 13px/1 var(--font);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
-.ws-seg-btn + .ws-seg-btn { border-left: 1px solid var(--border); }
-.ws-seg-btn:active { background: var(--surface2, var(--surface)); }
-@media (hover: hover) {
-  .ws-seg-btn:hover { color: var(--text); background: var(--surface2, var(--surface)); }
-}
-.ws-seg-btn[aria-pressed="true"] {
+.ws-seg-btn--active {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
   color: var(--accent);
 }
-/* Build is the primary action: an auto-width accent button with a visible
-   "Build" label beside the play glyph, not an ambiguous icon. */
-.ws-build-btn {
-  width: auto;
-  gap: 7px;
-  padding: 0 14px;
-}
-.ws-build-label { font: 600 13px/1 var(--font); }
-/* Narrow phones: drop the segment text so the bar stays single-line, but keep
-   the Build label (the primary action stays named). */
-@media (max-width: 420px) {
-  .ws-seg-label { display: none; }
-  .ws-seg-btn { padding: 0 12px; }
+.ws-seg-btn:active { background: var(--surface2, var(--surface)); }
+@media (hover: hover) {
+  .ws-seg-btn:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); }
 }
 /* /mobius-ui:Toolbar */
 
@@ -3668,13 +3747,13 @@ const CSS = `
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* mobius-ui:ChatEmbed v1 — keep in sync; library candidate. Diverge below the marker only. */
-/* ---- chat panel (bottom sheet, toggled) ----
+/* mobius-ui:ChatEmbed v1 — keep in sync with app-latex (unprefixed) */
+/* ---- chat panel (bottom half of the 50/50 split) ----
    The embedded shell chat runs inside an iframe (window.mobius.chat). The
-   panel needs a BOUNDED height and the embed needs min-height:0 so the iframe
-   (which has its own internal scroll + a sticky composer) can shrink to fit
-   and scroll internally instead of overflowing the container.
-   Height is set via the --ws-chat-ratio CSS variable on ws-body when chat is open. */
+   panel takes EXACTLY the height --ws-chat-ratio allots it (no internal
+   min/max fighting the divider) and is a flex column; the embed fills it
+   (flex:1 + min-height:0) and the iframe fills the embed, so the chat's
+   composer is pinned to the bottom of the panel. */
 .ws-chat-panel {
   flex: 0 0 auto;
   height: calc(var(--ws-chat-ratio, 0.5) * 100%);
@@ -3682,29 +3761,39 @@ const CSS = `
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-top: 1px solid var(--border);
   overflow: hidden;
+  overscroll-behavior: contain;
   /* Bottom-pinned sheet: lift the embedded chat composer above the iPhone
      home-indicator / Android gesture bar on a full-screen PWA. */
   padding-bottom: env(safe-area-inset-bottom);
 }
-/* ---- chat toggle button ---- */
-.ws-chat-toggle[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--accent) 20%, var(--surface));
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  color: var(--accent);
-}
-/* ---- draggable divider between content and chat ---- */
+/* The draggable divider ("glider") between content and chat: a SLIM 10px
+   visual bar; the ::before overlay extends the pointer hit area to ~26px
+   without adding visual weight. z-index keeps the overlay above the
+   adjacent panes so the extra hit area actually receives the pointer. */
 .ws-chat-divider {
-  flex: 0 0 44px;
+  flex: 0 0 10px;
+  height: 10px; /* explicit: keep in sync with app-latex (grid ignores flex-basis) */
+  box-sizing: border-box;
+  position: relative;
+  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: ns-resize;
   background: var(--surface);
   border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   touch-action: none;
   user-select: none;
+}
+.ws-chat-divider::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -8px;
+  bottom: -8px;
 }
 .ws-chat-divider:hover,
 .ws-chat-divider:focus-visible {
@@ -3713,7 +3802,7 @@ const CSS = `
 .ws-chat-divider:focus-visible { outline-offset: -2px; }
 .ws-chat-divider-bar {
   width: 44px;
-  height: 3px;
+  height: 4px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--muted) 65%, transparent);
   pointer-events: none;
@@ -3873,7 +3962,7 @@ const CSS = `
 
 /* The SyncPill component defaults to a floating bottom-right pill. Here it
    lives inline in the header, so un-float it. */
-.ws-top-actions .ws-sync-pill {
+.ws-top-zone--right .ws-sync-pill {
   position: static;
   right: auto;
   bottom: auto;
