@@ -1194,7 +1194,6 @@ function FileNavPanel({
         <div className="ws-drawer-head">
           <div>
             <span className="ws-drawer-title">Files</span>
-            <span className="ws-drawer-count">{files.filter(p => !p.endsWith('/.keep')).length} items</span>
           </div>
         </div>
         <div className="ws-drawer-actions">
@@ -1297,6 +1296,7 @@ function bootstrapPrompt() {
 function ChatPanel({
   appId, token, storage,
   onFilesMaybeChanged,
+  quickActions, getContext,
 }) {
   const mountRef = useRef(null)
   const [error, setError] = useState(null)
@@ -1306,6 +1306,10 @@ function ChatPanel({
   // the chat iframe — destroying a streaming turn mid-flight.
   const onFilesRef = useRef(onFilesMaybeChanged)
   useEffect(() => { onFilesRef.current = onFilesMaybeChanged }, [onFilesMaybeChanged])
+  const quickActionsRef = useRef(quickActions)
+  useEffect(() => { quickActionsRef.current = quickActions }, [quickActions])
+  const getContextRef = useRef(getContext)
+  useEffect(() => { getContextRef.current = getContext }, [getContext])
   const systemPrompt = useMemo(() => bootstrapPrompt(), [])
 
   useEffect(() => {
@@ -1324,6 +1328,11 @@ function ChatPanel({
       title: 'Web Studio',
       systemPrompt,
       picker: true,
+      quickActions: quickActionsRef.current,
+      getContext: () => {
+        const fn = getContextRef.current
+        return fn ? fn() : null
+      },
       onTurnDone: () => { if (onFilesRef.current) onFilesRef.current() },
       onError: ({ error }) => { setError(typeof error === 'string' ? error : 'Embedded chat reported an error.') },
     }).then((nextHandle) => {
@@ -2907,6 +2916,25 @@ export default function App({ appId, token }) {
   const showHtmlControls = !!mainPath && selectedPath === mainPath
   const openName = selectedPath ? selectedPath.replace(/^files\//, '') : null
 
+  const quickActions = useMemo(() => {
+    const actions = []
+    if (build.buildStatus === 'error') {
+      actions.push({ label: 'Fix the build', prompt: 'Fix the build errors.' })
+    }
+    actions.push({ label: 'Improve the design', prompt: 'Improve the visual design of the site.' })
+    actions.push({ label: 'Add a page', prompt: 'Add a new page to the site.' })
+    return actions
+  }, [build.buildStatus])
+
+  const getContext = useCallback(() => {
+    return Promise.resolve({
+      openFile: selectedPath || null,
+      viewMode: viewMode || null,
+      buildStatus: build.buildStatus || null,
+      mainFile: mainPath || null,
+    })
+  }, [selectedPath, viewMode, build.buildStatus, mainPath])
+
   return (
     <div className="ws-root">
       <style>{CSS}</style>
@@ -2985,7 +3013,7 @@ export default function App({ appId, token }) {
           <button
             type="button"
             className="ws-icon-btn ws-chat-toggle"
-            aria-label="Toggle chat"
+            aria-label={chatOpen ? 'Close chat' : 'Open chat'}
             aria-pressed={chatOpen}
             title={chatOpen ? 'Close chat' : 'Open chat'}
             onClick={toggleChat}
@@ -3042,6 +3070,8 @@ export default function App({ appId, token }) {
               token={token}
               storage={storage}
               onFilesMaybeChanged={onFilesMaybeChanged}
+              quickActions={quickActions}
+              getContext={getContext}
             />
           </>
         ) : (
@@ -3439,13 +3469,6 @@ const CSS = `
   user-select: none;
 }
 .ws-drawer-title { font-size: 14px; font-weight: 600; color: var(--text); }
-.ws-drawer-count {
-  display: block;
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-}
 .ws-drawer-actions {
   display: flex;
   gap: 6px;
