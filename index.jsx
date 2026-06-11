@@ -677,6 +677,30 @@ function PlayIcon({ size = 20 }) {
     </svg>
   )
 }
+// Hammer icon for the Build action (lucide-style, fill none, round caps).
+function HammerIcon({ size = 18 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="m15 12-8.5 8.5a2.12 2.12 0 0 1-3-3L12 9" />
+      <path d="M17.64 15 22 10.64" />
+      <path d="m2 2 4.5 4.5" />
+      <path d="M14 6.84 20.16 13 22 11.16 15.84 5 14 6.84z" />
+    </svg>
+  )
+}
+// Spinning dots indicator for "Building…" state (pure CSS animation, no keyframes needed —
+// we use a CSS class on the icon wrapper).
+function BuildingIndicator({ size = 18 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden className="ws-building-spin">
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+    </svg>
+  )
+}
 function KebabIcon({ size = 18 }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
@@ -1487,17 +1511,15 @@ function ModalView({ state }) {
 // ----------------------------------------------------------------------
 const FILE_CONTENT_CACHE_LIMIT = 20
 const FILE_CACHE_VERSION = 1
-// v2: lowered the chat-panel floor so the chat can collapse to ~composer
-// height (hide-chat / full-vibe). Bumped so previously-stored heights, which
-// were clamped to the old 24% floor, re-clamp under the new floor rather than
-// pinning the panel open.
-const CHAT_HEIGHT_CACHE_VERSION = 2
-// The chat panel collapses to roughly the composer + head height. As a percent
-// of the body this floor lets the resizer (and the Home key) hide the chat so
-// the source editor gets nearly the whole viewport; the CSS min-height below
-// is the matching pixel floor. The 68% ceiling is unchanged.
-const CHAT_MIN_PCT = 12
-const CHAT_MAX_PCT = 68
+// v3: full-range chat panel (0 = fully collapsed, 100 = full screen). No min/max
+// clamps — the handle can slide anywhere from a slim grab strip to covering
+// the whole body. Bumped so previously-stored v2 heights (clamped to 12-68)
+// are migrated to the new unclamped range on first load.
+const CHAT_HEIGHT_CACHE_VERSION = 3
+// Sentinel for the fully-collapsed state (only the resizer grab bar is visible).
+const CHAT_COLLAPSED = 0
+// Default mid position used when toggling from collapsed with no prior history.
+const CHAT_DEFAULT_MID_PCT = 40
 
 function fileCacheKey(appId) {
   return `webstudio:${appId}:files-cache:v${FILE_CACHE_VERSION}`
@@ -1508,10 +1530,10 @@ function chatHeightKey(appId) {
 }
 
 function readChatHeight(appId) {
-  if (typeof localStorage === 'undefined') return 36
+  if (typeof localStorage === 'undefined') return CHAT_DEFAULT_MID_PCT
   const raw = Number(localStorage.getItem(chatHeightKey(appId)))
-  if (!Number.isFinite(raw)) return 36
-  return Math.min(CHAT_MAX_PCT, Math.max(CHAT_MIN_PCT, raw))
+  if (!Number.isFinite(raw) || raw < 0 || raw > 100) return CHAT_DEFAULT_MID_PCT
+  return raw
 }
 
 function readFileCache(appId) {
@@ -1911,6 +1933,8 @@ export default function App({ appId, token }) {
   useEffect(() => { fileSavingRef.current = fileSaving }, [fileSaving])
   const [pending, setPending] = useState(0)
   const [chatHeight, setChatHeight] = useState(() => readChatHeight(appId))
+  // Remembers the last non-collapsed height so the tap-toggle can restore it.
+  const lastMidPctRef = useRef(null)
   // Viewer mode, toggled by the [Source | Preview] segmented control. 'source'
   // shows the editable CodeMirror source; 'preview' shows the MAIN page's built site.
   const [viewMode, setViewMode] = useState('source')
@@ -1928,38 +1952,70 @@ export default function App({ appId, token }) {
     try { localStorage.setItem(chatHeightKey(appId), String(chatHeight)) } catch {}
   }, [appId, chatHeight])
 
+  // Keep lastMidPctRef in sync whenever the panel moves away from collapsed.
+  useEffect(() => {
+    if (chatHeight > CHAT_COLLAPSED) lastMidPctRef.current = chatHeight
+  }, [chatHeight])
+
   const resizeChatBy = useCallback((deltaPct) => {
-    setChatHeight((value) => Math.min(CHAT_MAX_PCT, Math.max(CHAT_MIN_PCT, value + deltaPct)))
+    setChatHeight((value) => Math.max(CHAT_COLLAPSED, Math.min(100, value + deltaPct)))
   }, [])
 
   const beginChatResize = useCallback((event) => {
     event.preventDefault()
     const body = bodyRef.current
-    const panel = body?.querySelector?.('.ws-chat-panel')
-    if (!body || !panel) return
+    if (!body) return
     const total = body.getBoundingClientRect().height
     if (!total) return
-    const startY = event.clientY
-    const startHeight = panel.getBoundingClientRect().height
-    // Pixel floor mirrors CHAT_MIN_PCT so the drag can collapse the chat to
-    // ~composer height; the ceiling keeps a sliver of editor visible.
-    const minPx = total * (CHAT_MIN_PCT / 100)
-    const maxPx = Math.max(minPx, total * (CHAT_MAX_PCT / 100))
 
-    // Capture the pointer on the resizer bar so the drag survives the pointer
-    // crossing the preview iframe (which would otherwise steal the events).
+    const startY = event.clientY
+    const startTime = Date.now()
+    let moved = false
+
+    // Current panel height in pixels at drag start (read from the CSS variable).
+    const startHeightPx = total * (chatHeight / 100)
+
+    // Capture the pointer so the drag survives crossing the preview iframe.
     event.currentTarget.setPointerCapture(event.pointerId)
+
     const onMove = (moveEvent) => {
-      const nextPx = Math.min(maxPx, Math.max(minPx, startHeight + startY - moveEvent.clientY))
-      setChatHeight(Math.min(CHAT_MAX_PCT, Math.max(CHAT_MIN_PCT, (nextPx / total) * 100)))
+      moved = true
+      const nextPx = Math.max(0, Math.min(total, startHeightPx + startY - moveEvent.clientY))
+      setChatHeight((nextPx / total) * 100)
     }
-    const onUp = () => {
+
+    const onUp = (upEvent) => {
       window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
+
+      if (!moved) {
+        // Tap (no drag): toggle collapsed ↔ last mid position.
+        setChatHeight((current) => {
+          if (current <= CHAT_COLLAPSED) {
+            return lastMidPctRef.current ?? CHAT_DEFAULT_MID_PCT
+          }
+          return CHAT_COLLAPSED
+        })
+        return
+      }
+
+      // Flick detection: if the drag was fast and short, snap to full/collapsed.
+      const elapsed = Math.max(1, Date.now() - startTime)
+      const dy = startY - upEvent.clientY  // positive = dragged up (panel grows)
+      const velocity = dy / elapsed        // px/ms, positive = upward
+
+      if (velocity > 0.4) {
+        // Fast flick up → full screen
+        setChatHeight(100)
+      } else if (velocity < -0.4) {
+        // Fast flick down → collapsed
+        setChatHeight(CHAT_COLLAPSED)
+      }
+      // Otherwise leave at wherever the drag ended (already set by onMove).
     }
+
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp, { once: true })
-  }, [])
+  }, [chatHeight])
 
   const handleResizeKey = useCallback((event) => {
     if (event.key === 'ArrowUp') {
@@ -1970,10 +2026,10 @@ export default function App({ appId, token }) {
       resizeChatBy(-4)
     } else if (event.key === 'Home') {
       event.preventDefault()
-      setChatHeight(CHAT_MIN_PCT)
+      setChatHeight(CHAT_COLLAPSED)
     } else if (event.key === 'End') {
       event.preventDefault()
-      setChatHeight(CHAT_MAX_PCT)
+      setChatHeight(100)
     }
   }, [resizeChatBy])
 
@@ -2894,45 +2950,44 @@ export default function App({ appId, token }) {
         <div className="ws-top-actions">
           {showHtmlControls && (
             <>
-              {/* Segmented [Source | Preview] toggle with visible text labels —
-                  the two most important view states named, not an ambiguous
-                  eye/code glyph. role=group + aria-pressed exposes the active
-                  segment to assistive tech. */}
+              {/* Icon-only [Source | Preview] toggle. role=group + aria-pressed exposes
+                  the active segment to assistive tech; title + aria-label name the action. */}
               <div className="ws-seg" role="group" aria-label="View mode">
                 <button
                   type="button"
                   className="ws-seg-btn"
                   aria-pressed={viewMode !== 'preview'}
-                  title="Show source"
+                  aria-label="Source view"
+                  title="Source"
                   onClick={() => setViewMode('source')}
                 >
-                  <CodeIcon size={16} />
-                  <span className="ws-seg-label">Source</span>
+                  <CodeIcon size={17} />
                 </button>
                 <button
                   type="button"
                   className="ws-seg-btn"
                   aria-pressed={viewMode === 'preview'}
-                  title="Show preview"
+                  aria-label="Preview"
+                  title="Preview"
                   onClick={() => setViewMode('preview')}
                 >
-                  <EyeIcon size={16} />
-                  <span className="ws-seg-label">Preview</span>
+                  <EyeIcon size={17} />
                 </button>
               </div>
               <button
-                className="ws-icon-btn ws-icon-btn--primary ws-build-btn"
+                className="ws-icon-btn ws-icon-btn--primary"
                 onClick={handleBuild}
                 disabled={build.buildStatus === 'building'}
-                aria-label={`Build and preview the main page (${mainPath.replace(/^files\//, '')})`}
+                aria-label={build.buildStatus === 'building'
+                  ? 'Building…'
+                  : `Build ${mainPath.replace(/^files\//, '')}`}
                 title={build.buildStatus === 'building'
                   ? 'Building…'
-                  : `Build + preview ${mainPath.replace(/^files\//, '')}`}
+                  : `Build ${mainPath.replace(/^files\//, '')}`}
               >
-                <PlayIcon size={16} />
-                <span className="ws-build-label">
-                  {build.buildStatus === 'building' ? 'Building…' : 'Build'}
-                </span>
+                {build.buildStatus === 'building'
+                  ? <BuildingIndicator size={17} />
+                  : <HammerIcon size={17} />}
               </button>
             </>
           )}
@@ -2970,8 +3025,8 @@ export default function App({ appId, token }) {
           role="separator"
           aria-label="Resize chat and preview areas"
           aria-orientation="horizontal"
-          aria-valuemin={CHAT_MIN_PCT}
-          aria-valuemax={CHAT_MAX_PCT}
+          aria-valuemin={0}
+          aria-valuemax={100}
           aria-valuenow={Math.round(chatHeight)}
           tabIndex={0}
           onPointerDown={beginChatResize}
@@ -3584,23 +3639,23 @@ const CSS = `
   text-overflow: ellipsis;
 }
 /* mobius-ui:ChatEmbed v1 — keep in sync; library candidate. Diverge below the marker only. */
-/* ---- chat panel (bottom sheet, bounded height) ----
+/* ---- chat panel (bottom sheet, full range) ----
    The embedded shell chat runs inside an iframe (window.mobius.chat). The
    panel needs a BOUNDED height and the embed needs min-height:0 so the iframe
    (which has its own internal scroll + a sticky composer) can shrink to fit
-   and scroll internally instead of overflowing the container. */
+   and scroll internally instead of overflowing the container.
+   When --ws-chat-panel-height is 0% the panel collapses completely (only the
+   resizer handle remains visible). No min-height or max-height clamp — the
+   range is 0..100% of the body. */
 .ws-chat-panel {
   flex: 0 0 auto;
-  height: var(--ws-chat-panel-height, 36%);
-  /* Floor low enough to collapse to ~composer height (head + a row for the
-     composer): the hide-chat / full-vibe layout where the source editor takes
-     almost the whole viewport. Was min(220px, 45%), which pinned the chat open. */
-  min-height: min(96px, 18%);
-  max-height: calc(100% - 120px);
+  height: var(--ws-chat-panel-height, 40%);
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--surface);
   border-top: 1px solid var(--border);
+  overflow: hidden;
   /* Bottom-pinned sheet: lift the embedded chat composer above the iPhone
      home-indicator / Android gesture bar on a full-screen PWA. */
   padding-bottom: env(safe-area-inset-bottom);
