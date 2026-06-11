@@ -712,6 +712,15 @@ function KebabIcon({ size = 18 }) {
     </svg>
   )
 }
+function ChatBubbleIcon({ size = 20 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  )
+}
 
 // In-app context menu. Native context menus / window.prompt are unavailable
 // in the mini-app sandbox (no allow-modals), and a native right-click menu
@@ -1511,28 +1520,34 @@ function ModalView({ state }) {
 // ----------------------------------------------------------------------
 const FILE_CONTENT_CACHE_LIMIT = 20
 const FILE_CACHE_VERSION = 1
-// v3: full-range chat panel (0 = fully collapsed, 100 = full screen). No min/max
-// clamps — the handle can slide anywhere from a slim grab strip to covering
-// the whole body. Bumped so previously-stored v2 heights (clamped to 12-68)
-// are migrated to the new unclamped range on first load.
-const CHAT_HEIGHT_CACHE_VERSION = 3
-// Sentinel for the fully-collapsed state (only the resizer grab bar is visible).
-const CHAT_COLLAPSED = 0
-// Default mid position used when toggling from collapsed with no prior history.
-const CHAT_DEFAULT_MID_PCT = 40
+const CHAT_OPEN_VERSION = 1
+const CHAT_RATIO_VERSION = 1
 
 function fileCacheKey(appId) {
   return `webstudio:${appId}:files-cache:v${FILE_CACHE_VERSION}`
 }
 
-function chatHeightKey(appId) {
-  return `webstudio:${appId}:chat-height:v${CHAT_HEIGHT_CACHE_VERSION}`
+function chatOpenKey(appId) {
+  return `webstudio:${appId}:chat-open:v${CHAT_OPEN_VERSION}`
 }
 
-function readChatHeight(appId) {
-  if (typeof localStorage === 'undefined') return CHAT_DEFAULT_MID_PCT
-  const raw = Number(localStorage.getItem(chatHeightKey(appId)))
-  if (!Number.isFinite(raw) || raw < 0 || raw > 100) return CHAT_DEFAULT_MID_PCT
+function chatRatioKey(appId) {
+  return `webstudio:${appId}:chat-ratio:v${CHAT_RATIO_VERSION}`
+}
+
+function readChatOpen(appId) {
+  if (typeof localStorage === 'undefined') return false
+  try {
+    const raw = localStorage.getItem(chatOpenKey(appId))
+    if (raw === null) return false
+    return JSON.parse(raw) === true
+  } catch { return false }
+}
+
+function readChatRatio(appId) {
+  if (typeof localStorage === 'undefined') return 0.5
+  const raw = Number(localStorage.getItem(chatRatioKey(appId)))
+  if (!Number.isFinite(raw) || raw < 0 || raw > 1) return 0.5
   return raw
 }
 
@@ -1932,9 +1947,8 @@ export default function App({ appId, token }) {
   useEffect(() => { fileDirtyRef.current = fileDirty }, [fileDirty])
   useEffect(() => { fileSavingRef.current = fileSaving }, [fileSaving])
   const [pending, setPending] = useState(0)
-  const [chatHeight, setChatHeight] = useState(() => readChatHeight(appId))
-  // Remembers the last non-collapsed height so the tap-toggle can restore it.
-  const lastMidPctRef = useRef(null)
+  const [chatOpen, setChatOpen] = useState(() => readChatOpen(appId))
+  const [chatRatio, setChatRatio] = useState(() => readChatRatio(appId))
   // Viewer mode, toggled by the [Source | Preview] segmented control. 'source'
   // shows the editable CodeMirror source; 'preview' shows the MAIN page's built site.
   const [viewMode, setViewMode] = useState('source')
@@ -1949,16 +1963,26 @@ export default function App({ appId, token }) {
 
   useEffect(() => {
     if (typeof localStorage === 'undefined') return
-    try { localStorage.setItem(chatHeightKey(appId), String(chatHeight)) } catch {}
-  }, [appId, chatHeight])
+    try { localStorage.setItem(chatOpenKey(appId), JSON.stringify(chatOpen)) } catch {}
+  }, [appId, chatOpen])
 
-  // Keep lastMidPctRef in sync whenever the panel moves away from collapsed.
   useEffect(() => {
-    if (chatHeight > CHAT_COLLAPSED) lastMidPctRef.current = chatHeight
-  }, [chatHeight])
+    if (typeof localStorage === 'undefined') return
+    try { localStorage.setItem(chatRatioKey(appId), String(chatRatio)) } catch {}
+  }, [appId, chatRatio])
 
-  const resizeChatBy = useCallback((deltaPct) => {
-    setChatHeight((value) => Math.max(CHAT_COLLAPSED, Math.min(100, value + deltaPct)))
+  const toggleChat = useCallback(() => {
+    setChatOpen((open) => {
+      if (!open) {
+        // Turning on: reset ratio to 0.5 if it was near-zero
+        setChatRatio((r) => (r <= 0.01 ? 0.5 : r))
+      }
+      return !open
+    })
+  }, [])
+
+  const resizeChatBy = useCallback((deltaRatio) => {
+    setChatRatio((value) => Math.max(0.05, Math.min(0.95, value + deltaRatio)))
   }, [])
 
   const beginChatResize = useCallback((event) => {
@@ -1969,67 +1993,37 @@ export default function App({ appId, token }) {
     if (!total) return
 
     const startY = event.clientY
-    const startTime = Date.now()
-    let moved = false
-
-    // Current panel height in pixels at drag start (read from the CSS variable).
-    const startHeightPx = total * (chatHeight / 100)
+    const startRatio = chatRatio
 
     // Capture the pointer so the drag survives crossing the preview iframe.
     event.currentTarget.setPointerCapture(event.pointerId)
 
     const onMove = (moveEvent) => {
-      moved = true
-      const nextPx = Math.max(0, Math.min(total, startHeightPx + startY - moveEvent.clientY))
-      setChatHeight((nextPx / total) * 100)
+      const nextRatio = Math.max(0.05, Math.min(0.95, startRatio + (startY - moveEvent.clientY) / total))
+      setChatRatio(nextRatio)
     }
 
-    const onUp = (upEvent) => {
+    const onUp = () => {
       window.removeEventListener('pointermove', onMove)
-
-      if (!moved) {
-        // Tap (no drag): toggle collapsed ↔ last mid position.
-        setChatHeight((current) => {
-          if (current <= CHAT_COLLAPSED) {
-            return lastMidPctRef.current ?? CHAT_DEFAULT_MID_PCT
-          }
-          return CHAT_COLLAPSED
-        })
-        return
-      }
-
-      // Flick detection: if the drag was fast and short, snap to full/collapsed.
-      const elapsed = Math.max(1, Date.now() - startTime)
-      const dy = startY - upEvent.clientY  // positive = dragged up (panel grows)
-      const velocity = dy / elapsed        // px/ms, positive = upward
-
-      if (velocity > 0.4) {
-        // Fast flick up → full screen
-        setChatHeight(100)
-      } else if (velocity < -0.4) {
-        // Fast flick down → collapsed
-        setChatHeight(CHAT_COLLAPSED)
-      }
-      // Otherwise leave at wherever the drag ended (already set by onMove).
     }
 
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp, { once: true })
-  }, [chatHeight])
+  }, [chatRatio])
 
   const handleResizeKey = useCallback((event) => {
     if (event.key === 'ArrowUp') {
       event.preventDefault()
-      resizeChatBy(4)
+      resizeChatBy(0.04)
     } else if (event.key === 'ArrowDown') {
       event.preventDefault()
-      resizeChatBy(-4)
+      resizeChatBy(-0.04)
     } else if (event.key === 'Home') {
       event.preventDefault()
-      setChatHeight(CHAT_COLLAPSED)
+      setChatRatio(0.05)
     } else if (event.key === 'End') {
       event.preventDefault()
-      setChatHeight(100)
+      setChatRatio(0.95)
     }
   }, [resizeChatBy])
 
@@ -2991,6 +2985,16 @@ export default function App({ appId, token }) {
               </button>
             </>
           )}
+          <button
+            type="button"
+            className="ws-icon-btn ws-chat-toggle"
+            aria-label="Toggle chat"
+            aria-pressed={chatOpen}
+            title={chatOpen ? 'Close chat' : 'Open chat'}
+            onClick={toggleChat}
+          >
+            <ChatBubbleIcon size={17} />
+          </button>
           <SyncPill online={online} pending={pending} hasRuntime={storage.hasRuntime} />
         </div>
       </header>
@@ -2998,7 +3002,7 @@ export default function App({ appId, token }) {
       <div
         ref={bodyRef}
         className="ws-body"
-        style={{ '--ws-chat-panel-height': `${chatHeight}%` }}
+        style={chatOpen ? { '--ws-chat-ratio': chatRatio } : undefined}
       >
         <FileNavPanel
           appId={appId}
@@ -3019,27 +3023,33 @@ export default function App({ appId, token }) {
           onSetMain={handleSetMain}
           returnFocusRef={navToggleRef}
         />
-        <main className="ws-content">{renderMain()}</main>
-        <div
-          className="ws-chat-resizer"
-          role="separator"
-          aria-label="Resize chat and preview areas"
-          aria-orientation="horizontal"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(chatHeight)}
-          tabIndex={0}
-          onPointerDown={beginChatResize}
-          onKeyDown={handleResizeKey}
-        >
-          <span className="ws-chat-resizer-bar" aria-hidden="true" />
-        </div>
-        <ChatPanel
-          appId={appId}
-          token={token}
-          storage={storage}
-          onFilesMaybeChanged={onFilesMaybeChanged}
-        />
+        {chatOpen ? (
+          <>
+            <main className="ws-content ws-content--flex" style={{ flex: `${1 - chatRatio} 1 0`, minHeight: 0 }}>{renderMain()}</main>
+            <div
+              className="ws-chat-divider"
+              role="separator"
+              aria-label="Resize chat and editor areas"
+              aria-orientation="horizontal"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(chatRatio * 100)}
+              tabIndex={0}
+              onPointerDown={beginChatResize}
+              onKeyDown={handleResizeKey}
+            >
+              <span className="ws-chat-divider-bar" aria-hidden="true" />
+            </div>
+            <ChatPanel
+              appId={appId}
+              token={token}
+              storage={storage}
+              onFilesMaybeChanged={onFilesMaybeChanged}
+            />
+          </>
+        ) : (
+          <main className="ws-content">{renderMain()}</main>
+        )}
       </div>
       {modal.node}
     </div>
@@ -3639,17 +3649,15 @@ const CSS = `
   text-overflow: ellipsis;
 }
 /* mobius-ui:ChatEmbed v1 — keep in sync; library candidate. Diverge below the marker only. */
-/* ---- chat panel (bottom sheet, full range) ----
+/* ---- chat panel (bottom sheet, toggled) ----
    The embedded shell chat runs inside an iframe (window.mobius.chat). The
    panel needs a BOUNDED height and the embed needs min-height:0 so the iframe
    (which has its own internal scroll + a sticky composer) can shrink to fit
    and scroll internally instead of overflowing the container.
-   When --ws-chat-panel-height is 0% the panel collapses completely (only the
-   resizer handle remains visible). No min-height or max-height clamp — the
-   range is 0..100% of the body. */
+   Height is set via the --ws-chat-ratio CSS variable on ws-body when chat is open. */
 .ws-chat-panel {
   flex: 0 0 auto;
-  height: var(--ws-chat-panel-height, 40%);
+  height: calc(var(--ws-chat-ratio, 0.5) * 100%);
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -3660,29 +3668,35 @@ const CSS = `
      home-indicator / Android gesture bar on a full-screen PWA. */
   padding-bottom: env(safe-area-inset-bottom);
 }
-.ws-chat-resizer {
-  flex: 0 0 9px;
+/* ---- chat toggle button ---- */
+.ws-chat-toggle[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--accent);
+}
+/* ---- draggable divider between content and chat ---- */
+.ws-chat-divider {
+  flex: 0 0 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: ns-resize;
   background: var(--surface);
   border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
   touch-action: none;
+  user-select: none;
 }
-.ws-chat-resizer:hover,
-.ws-chat-resizer:focus-visible {
+.ws-chat-divider:hover,
+.ws-chat-divider:focus-visible {
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
-/* The 9px-tall separator is a thin line with a fat hit area; the shared
-   :focus-visible ring sits flush inside it, so pull the offset in. */
-.ws-chat-resizer:focus-visible { outline-offset: -2px; }
-.ws-chat-resizer-bar {
+.ws-chat-divider:focus-visible { outline-offset: -2px; }
+.ws-chat-divider-bar {
   width: 44px;
   height: 3px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--muted) 65%, transparent);
+  pointer-events: none;
 }
 .ws-chat-embed {
   flex: 1 1 auto;
