@@ -1594,21 +1594,18 @@ function writeFileCache(appId, index, contents, lastPath) {
 //   online + pending == 0  → null (idle steady state)
 // hasRuntime=false (older shell) hides the pill rather than fabricate a queue.
 // ----------------------------------------------------------------------
+// Standard: show nothing when online+idle. Only surface Offline (with optional
+// pending count) — that's the one state the user needs to know about.
 function SyncPill({ online, pending, hasRuntime }) {
   if (!hasRuntime) return null
-  let label = null
-  let variant = null
-  if (pending > 0) {
-    label = online ? `Saving · ${pending} pending` : `Offline · ${pending} pending`
-    variant = online ? 'pending' : 'offline'
-  } else if (!online) {
-    label = 'Offline'
-    variant = 'offline'
-  }
+  if (online && pending === 0) return null
+  const label = !online
+    ? (pending > 0 ? `Offline · ${pending} pending` : 'Offline')
+    : null
   if (!label) return null
   return (
     <div
-      className={`ws-sync-pill ws-sync-pill--${variant}`}
+      className="ws-sync-pill ws-sync-pill--offline"
       role="status"
       aria-live="polite"
       title="Changes save locally and sync when you're back online."
