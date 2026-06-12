@@ -458,10 +458,46 @@ document.addEventListener('click', function (event) {
 }, true)
 `
 
+// Bounded, cancellation-aware retry around a single read. The preview's MAIN
+// page fetch is its one hard single point of failure: every asset sub-fetch
+// degrades gracefully (keeps the original ref on error), but if that read
+// returns null or throws on a transient blip the whole frame bricks. Retrying
+// a few times with a short growing backoff means one flaky read can't take
+// the preview down, while a genuinely-absent page is still null after the
+// attempts and falls through to the caller's error path. `isCancelled` is
+// honoured between attempts so an unmount/version change stops the loop
+// promptly instead of racing a stale read against the next render. Exported
+// (with `sleep` injectable) so the retry/give-up contract is unit-testable
+// without real timers.
+export async function readWithRetry(read, {
+  attempts = 3,
+  baseDelayMs = 300,
+  isCancelled = () => false,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  let lastErr = null
+  for (let i = 0; i < attempts; i += 1) {
+    if (isCancelled()) return null
+    try {
+      const v = await read()
+      if (v != null) return v
+      lastErr = null // null = absent-or-transient; retry, then give up cleanly
+    } catch (e) {
+      lastErr = e
+    }
+    if (i < attempts - 1) await sleep(baseDelayMs * (i + 1))
+  }
+  if (lastErr) throw lastErr
+  return null
+}
+
 function HtmlPreview({ storage, entryPath, version }) {
   const [srcDoc, setSrcDoc] = useState(null)
   const [err, setErr] = useState(null)
   const [loading, setLoading] = useState(true)
+  // Bumped by the Retry button to re-run the render effect after a failed
+  // load, so a flaky read doesn't permanently brick the preview frame.
+  const [reloadTick, setReloadTick] = useState(0)
   const createdUrlsRef = useRef([])
   const frameRef = useRef(null)
   // The page currently shown — starts at the build's entry and changes when
@@ -541,7 +577,12 @@ function HtmlPreview({ storage, entryPath, version }) {
 
     ;(async () => {
       try {
-        const html = await storage.getText(pageEntry)
+        // readWithRetry (module level) holds the retry contract — the main
+        // page is the one read whose failure bricks the whole frame.
+        const html = await readWithRetry(
+          () => storage.getText(pageEntry),
+          { isCancelled: () => cancelled },
+        )
         if (cancelled) return
         if (html == null) throw new Error('Built page could not be loaded. Try Build again.')
 
@@ -643,7 +684,7 @@ function HtmlPreview({ storage, entryPath, version }) {
     })()
 
     return () => { cancelled = true }
-  }, [storage, pageEntry, version])
+  }, [storage, pageEntry, version, reloadTick])
 
   // Revoke blob URLs on unmount.
   useEffect(() => () => {
@@ -651,7 +692,20 @@ function HtmlPreview({ storage, entryPath, version }) {
     createdUrlsRef.current = []
   }, [])
 
-  if (err) return <div className="ws-preview-note">{err}</div>
+  if (err) {
+    return (
+      <div className="ws-preview-note">
+        <p style={{ margin: '0 0 14px' }}>{err}</p>
+        <button
+          type="button"
+          className="ws-preview-retry"
+          onClick={() => { setErr(null); setLoading(true); setReloadTick((t) => t + 1) }}
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
   return (
     <div className="ws-preview">
       {loading && <div className="ws-preview-note">Rendering preview…</div>}
@@ -3468,6 +3522,19 @@ const CSS = `
   line-height: 1.55;
 }
 .ws-preview-note b { color: var(--text); }
+.ws-preview-retry {
+  min-height: 44px;
+  padding: 10px 22px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ws-preview-retry:active { transform: scale(0.97); }
 .ws-build-note { padding: 32px 18px; }
 
 /* ---- build failure ---- */
