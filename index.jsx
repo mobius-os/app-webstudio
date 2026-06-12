@@ -72,6 +72,19 @@ export function isHtmlDoc(path) {
   return path.endsWith('.html') || path.endsWith('.htm')
 }
 
+// First file to open when nothing is selected yet. The main page wins over
+// alphabetical order: showHtmlControls requires selectedPath === mainPath,
+// so opening anything else (e.g. files/about/index.html, which sorts before
+// files/index.html) would hide the Build/Preview controls on first load.
+// Then any HTML page, any editable text file, any non-placeholder entry.
+export function pickAutoSelectPath(files, mainPath) {
+  if (mainPath && files.includes(mainPath)) return mainPath
+  return files.find((p) => isHtmlDoc(p))
+    || files.find((p) => isTextProjectPath(p))
+    || files.find((p) => !p.endsWith('/.keep'))
+    || null
+}
+
 // Resolve a successful build's entry path for a given main doc. The build
 // writes the rendered site under build/site/, mirroring the files/ tree, so
 // the entry for files/index.html is build/site/index.html. We honour the
@@ -333,7 +346,8 @@ function ImagePreview({ storage, path }) {
 // images/fonts into blob URLs; url() refs inside inline styles rewritten.
 //
 // Links inside the preview:
-//   - same-site links to another BUILT PAGE (about.html, sub/, /pricing.html)
+//   - same-site links to another BUILT PAGE (about.html, sub/, /pricing.html,
+//     and the site root itself — "/" or "../" — which serves index.html)
 //     navigate WITHIN the preview: a tiny injected script preventDefaults the
 //     click and postMessages the resolved build/site/ path up to this
 //     component, which re-renders the preview at that page (srcdoc can't
@@ -341,8 +355,11 @@ function ImagePreview({ storage, path }) {
 //   - external links (http/https or //) get target=_blank rel=noopener
 //     injected so they open in a NEW TAB instead of navigating (and killing)
 //     the srcdoc preview.
-//   - same-site links to a non-page asset are neutralised (inert click)
-//     rather than left to jump to a broken about:srcdoc URL.
+//   - every OTHER schemeless link — a non-page asset, a ref that escapes the
+//     site, anything unresolvable — is neutralised (href removed, inert
+//     click) rather than left to natively navigate the frame away. Only
+//     #anchors and scheme'd links (mailto:, tel:, …) keep native behavior.
+// The full policy is anchorActionFor below.
 //
 // `version` (the build token) is in the deps so a rebuild that produces
 // the SAME deterministic entry path still refetches + re-renders the
@@ -353,7 +370,7 @@ function ImagePreview({ storage, path }) {
 // directory of the page being previewed, returning a storage path under
 // build/site/ — or null if it escapes the site, is absolute (http/data),
 // or otherwise isn't an in-site relative ref we should inline.
-function resolveSiteAsset(ref, entryPath) {
+export function resolveSiteAsset(ref, entryPath) {
   if (typeof ref !== 'string') return null
   const raw = ref.trim()
   if (!raw) return null
@@ -383,8 +400,48 @@ function resolveSiteAsset(ref, entryPath) {
     stack.push(seg)
   }
   const resolved = stack.join('/')
+  // The site root itself — href="/" or a "../" chain landing on it — serves
+  // its index page, exactly like a real web server. Without this mapping the
+  // bare "build/site" string fails the prefix guard below and a home link
+  // falls through as unresolvable.
+  if (resolved === 'build/site') return 'build/site/index.html'
   if (!resolved.startsWith('build/site/')) return null
   return resolved
+}
+
+// Decide what the preview should do with an <a href> on the page being
+// rendered. Pure (strings in, action out) so the rewrite policy is testable
+// without a DOM. The invariant callers rely on: NO schemeless href is ever
+// left live — the preview is a sandboxed srcdoc iframe, so a native relative
+// navigation has no site to land on (blank pane in the sandbox; the shell
+// origin in production).
+//   { kind: 'external' }                 → http(s):// or //…: open a NEW TAB
+//                                          (a plain click would navigate, and
+//                                          kill, the srcdoc preview)
+//   { kind: 'internal', target: <path> } → built page (directory-shaped refs
+//                                          like about/ or /docs resolve to
+//                                          their index page): in-preview
+//                                          navigation via the injected script
+//   { kind: 'keep' }                     → #anchor or scheme'd link (mailto:,
+//                                          tel:, data:, …) whose native
+//                                          behavior is already safe
+//   { kind: 'neutralise' }               → everything else — same-site
+//                                          non-page asset, ref escaping the
+//                                          site, empty or query-only href —
+//                                          drop the href so the click is inert
+export function anchorActionFor(href, pageEntry) {
+  const raw = typeof href === 'string' ? href.trim() : ''
+  if (/^(?:https?:)?\/\//i.test(raw)) return { kind: 'external' }
+  const sitePath = resolveSiteAsset(raw, pageEntry)
+  if (sitePath) {
+    const lower = sitePath.toLowerCase()
+    if (lower.endsWith('.html') || lower.endsWith('.htm')) return { kind: 'internal', target: sitePath }
+    const leaf = sitePath.slice(sitePath.lastIndexOf('/') + 1)
+    if (!leaf.includes('.')) return { kind: 'internal', target: `${sitePath}/index.html` }
+    return { kind: 'neutralise' }
+  }
+  if (raw.startsWith('#') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return { kind: 'keep' }
+  return { kind: 'neutralise' }
 }
 
 const PREVIEW_TEXT_EXTS = new Set(['css', 'js', 'mjs', 'json', 'svg'])
@@ -551,44 +608,19 @@ function HtmlPreview({ storage, entryPath, version }) {
           }
         }
 
-        // <a href> handling — three cases:
-        //   external (http/https or //)      → open a NEW TAB (target=_blank
-        //                                      rel=noopener); a plain click
-        //                                      would navigate (and kill) the
-        //                                      srcdoc preview.
-        //   same-site link to a built PAGE   → data-ws-internal=<resolved
-        //                                      build/site/ path>; the injected
-        //                                      script preventDefaults + post-
-        //                                      Messages it so the preview
-        //                                      navigates to that page. href is
-        //                                      kept so the link still styles.
-        //   same-site link to a non-page     → neutralised (no href) so the
-        //                                      click is inert rather than a
-        //                                      broken jump to about:srcdoc.
-        // In-page anchors (#...), mailto:/tel: etc. are untouched.
-        const navTargetFor = (ref) => {
-          const sitePath = resolveSiteAsset(ref, pageEntry)
-          if (!sitePath) return null
-          const lower = sitePath.toLowerCase()
-          if (lower.endsWith('.html') || lower.endsWith('.htm')) return sitePath
-          // Directory-shaped refs (about/, /docs) resolve to their index page.
-          const leaf = sitePath.slice(sitePath.lastIndexOf('/') + 1)
-          if (!leaf.includes('.')) return `${sitePath}/index.html`
-          return null
-        }
+        // <a href> handling — anchorActionFor (module level) holds the policy
+        // and its contract; this loop just applies the action to the detached
+        // DOM. Internal links keep their href so they still style as links;
+        // the injected script preventDefaults + postMessages the stamped path.
         for (const a of Array.from(doc.querySelectorAll('a[href]'))) {
           const href = (a.getAttribute('href') || '').trim()
-          if (/^(?:https?:)?\/\//i.test(href)) {
+          const action = anchorActionFor(href, pageEntry)
+          if (action.kind === 'external') {
             a.setAttribute('target', '_blank')
             a.setAttribute('rel', 'noopener noreferrer')
-            continue
-          }
-          const navTarget = navTargetFor(href)
-          if (navTarget) {
-            a.setAttribute('data-ws-internal', navTarget)
-            continue
-          }
-          if (resolveSiteAsset(href, pageEntry)) {
+          } else if (action.kind === 'internal') {
+            a.setAttribute('data-ws-internal', action.target)
+          } else if (action.kind === 'neutralise') {
             a.setAttribute('data-ws-asset', href)
             a.removeAttribute('href')
           }
@@ -2212,17 +2244,6 @@ export default function App({ appId, token }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Auto-select the first file once we have one. Prefer the HTML entry, then
-  // any text file, then any non-.keep entry.
-  useEffect(() => {
-    if (!selectedPath && files.length > 0) {
-      const firstReal = files.find((p) => isHtmlDoc(p))
-        || files.find((p) => isTextProjectPath(p))
-        || files.find((p) => !p.endsWith('/.keep'))
-      if (firstReal) setSelectedPath(firstReal)
-    }
-  }, [files, selectedPath])
-
   // Pick a sensible default main page: files/index.html if present, else the
   // first .html alphabetically, else null.
   const defaultMain = useCallback((list) => {
@@ -2261,6 +2282,16 @@ export default function App({ appId, token }) {
     })()
     return () => { cancelled = true }
   }, [indexLoaded, storage, online, defaultMain])
+
+  // Auto-select the first file once we have one — deferred until main.json
+  // has resolved so pickAutoSelectPath can prefer the main page. files/
+  // lands before main.json, so an undeferred pick would grab whatever HTML
+  // file sorts first and hide the Build/Preview controls on first load.
+  useEffect(() => {
+    if (selectedPath || !mainReady || files.length === 0) return
+    const firstReal = pickAutoSelectPath(files, mainPath)
+    if (firstReal) setSelectedPath(firstReal)
+  }, [files, selectedPath, mainPath, mainReady])
 
   // Keep the main page valid as the file list changes.
   useEffect(() => {
