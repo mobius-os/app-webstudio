@@ -1,7 +1,7 @@
 {
   "id": "webstudio",
   "name": "Web Studio",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Build a website with the agent and preview it live in an in-app browser.",
   "author": "mobius-os",
   "license": "MIT",

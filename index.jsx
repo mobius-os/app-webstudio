@@ -948,34 +948,6 @@ function ChatBubbleIcon({ size = 20 }) {
   )
 }
 
-// The app's brand mark, drawn inline so the top-bar logo paints instantly with
-// zero network — the previous <img src="/api/apps/<id>/icon"> fetched the
-// full-res PNG at runtime just to fill a 28px slot (and flashed a fallback ☰
-// while it loaded or 404'd). A browser window (title bar + traffic-light dots)
-// with an angle-bracket cue reads as "build a website in a browser" at toolbar
-// size. Currentcolor stroke so it inherits the theme; the body fills with
-// var(--bg) so the bracket stays legible against the surface.
-function WebStudioLogoIcon({ size = 28 }) {
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size}
-      role="img" aria-hidden focusable="false">
-      <rect x="3" y="4.5" width="18" height="15" rx="2"
-        fill="var(--bg)" stroke="currentColor" strokeWidth="1.6"
-        strokeLinejoin="round" />
-      {/* Browser title bar with three traffic-light dots. */}
-      <path d="M3 8.5h18" stroke="currentColor" strokeWidth="1.6"
-        strokeLinecap="round" />
-      <circle cx="6" cy="6.5" r="0.7" fill="currentColor" />
-      <circle cx="8.4" cy="6.5" r="0.7" fill="currentColor" />
-      <circle cx="10.8" cy="6.5" r="0.7" fill="currentColor" />
-      {/* Angle-bracket cue: < /> centred in the page area. */}
-      <path d="m10.5 12-1.8 1.8 1.8 1.8M13.5 12l1.8 1.8-1.8 1.8"
-        fill="none" stroke="currentColor" strokeWidth="1.6"
-        strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
 // In-app context menu. Native context menus / window.prompt are unavailable
 // in the mini-app sandbox (no allow-modals), and a native right-click menu
 // would also offer "back/reload/inspect" that make no sense here. So we render
@@ -3235,8 +3207,12 @@ export default function App({ appId, token }) {
           bar. Identical structure in app-latex (unprefixed classes). */}
       <header className="ws-top-bar">
         <div className="ws-top-zone ws-top-zone--left">
-          {/* The app's own logo is the drawer toggle, mirroring the Möbius shell
-              header where the logo (not a hamburger) opens the drawer. */}
+          {/* The app's own glossy icon is the drawer toggle, mirroring the
+              Möbius shell header where the logo (not a hamburger) opens the
+              drawer. The real icon image — the backend serves a downscaled ~6KB
+              copy at ?size=64 (cached 1h), so it paints fast without the old
+              full-res PNG cost; the accent-dot fallback shows when an install
+              has no custom icon (the route 404s). */}
           <button
             ref={navToggleRef}
             className="ws-nav-toggle"
@@ -3244,7 +3220,19 @@ export default function App({ appId, token }) {
             aria-label={navOpen ? 'Close file drawer' : 'Open file drawer'}
             aria-expanded={navOpen}
           >
-            <WebStudioLogoIcon size={28} />
+            <img
+              src={`/api/apps/${appId}/icon?size=64`}
+              alt=""
+              width={26}
+              height={26}
+              className="ws-brand-icon"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none'
+                const f = e.currentTarget.nextElementSibling
+                if (f) f.style.display = 'flex'
+              }}
+            />
+            <span className="ws-brand-fallback" style={{ display: 'none' }} aria-hidden="true" />
           </button>
           <div className="ws-top-title">
             {openName
@@ -3461,6 +3449,25 @@ const CSS = `
    ring so a tabbing user sees where they are. */
 .ws-nav-toggle:focus:not(:focus-visible) { outline: none; }
 .ws-nav-toggle:active { opacity: 0.7; }
+/* The real app icon as the brand mark inside the drawer toggle. */
+.ws-brand-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: block;
+}
+/* Accent-dot fallback shown when the install has no custom icon (route 404s). */
+.ws-brand-fallback {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent, var(--text));
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
 .ws-top-title {
   min-width: 0;
   display: flex;
