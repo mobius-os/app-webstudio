@@ -70,6 +70,7 @@ Expected output: ~107.6 KB, 0 errors. Install into a running Möbius instance vi
 
 | Version | Changes |
 |---------|---------|
+| 0.5.0 | Preview no longer breaks the shell or dead-ends links. Site `<script src>` is inlined as text (a blob: src is blocked from the null-origin srcdoc, so the site's JS — and its links/interactions — never ran); the injected click handler now scrolls in-page `#anchor` clicks itself instead of letting them push phantom entries into the session history the shell back-stack relies on (which desynced the owner's drawer / back-gesture). Chat-pane resize floored at the composer pill (list collapses to zero, pill always visible) — same `clampChatRatio` as app-latex / app-editor. Top-bar logo is now an inline SVG (instant paint, zero network) instead of `<img src=/api/apps/<id>/icon>`. |
 | 0.2.6 | Native-feel pass: seven balanced mobius-ui CSS fences, -webkit-tap-highlight-color + touch-action manipulation on all interactive chrome, user-select none on file tree / toolbar / context menu, :active feedback on buttons, hover behind @media (hover:hover) for tree rows. Improvements: setPointerCapture on chat-panel resize drag (survives iframe crossing), overscroll-behavior contain on build log + root + tree, aria-label="Agent chat" on chat section. |
 | 0.2.5 | Icon quantization + drawer bare logo-toggle + swipe-to-close |
 | 0.2.4 | Borderless tree icons + pressed state on ⋯ menu |

@@ -31,6 +31,8 @@ const {
   anchorActionFor,
   pickAutoSelectPath,
   resolveSiteAsset,
+  clampChatRatio,
+  WS_PREVIEW_NAV_SCRIPT,
 } = await import('./.build/index.mjs')
 
 const ROOT_PAGE = 'build/site/index.html'
@@ -123,4 +125,132 @@ test('auto-select prefers the main page over alphabetical order', () => {
   assert.equal(pickAutoSelectPath(['files/style.css'], null), 'files/style.css')
   assert.equal(pickAutoSelectPath(['files/img/.keep', 'files/logo.png'], null), 'files/logo.png')
   assert.equal(pickAutoSelectPath(['files/img/.keep'], null), null)
+})
+
+// ----------------------------------------------------------------------
+// Chat-pane resize bound (clampChatRatio): the chat collapses to exactly the
+// composer pill (CHAT_PANE_MIN_PX) and no smaller, and the editor/preview
+// always keeps at least one pill. Mirrors app-latex / app-editor.
+// ----------------------------------------------------------------------
+const CHAT_MIN = 74 // CHAT_PANE_MIN_PX (pill 64 + divider 10) — keep in sync with index.jsx
+
+test('clampChatRatio collapses to exactly the pill floor, never smaller', () => {
+  const total = 800
+  assert.equal(clampChatRatio(0, total, CHAT_MIN), CHAT_MIN / total)
+  assert.equal(clampChatRatio(-500, total, CHAT_MIN), CHAT_MIN / total)
+  assert.equal(clampChatRatio(CHAT_MIN - 1, total, CHAT_MIN), CHAT_MIN / total)
+})
+
+test('clampChatRatio caps the other end so the editor keeps a pill', () => {
+  const total = 800
+  assert.equal(clampChatRatio(total, total, CHAT_MIN), (total - CHAT_MIN) / total)
+  assert.equal(clampChatRatio(total + 500, total, CHAT_MIN), (total - CHAT_MIN) / total)
+})
+
+test('clampChatRatio passes mid-range values through unchanged', () => {
+  const total = 800
+  assert.equal(clampChatRatio(400, total, CHAT_MIN), 0.5)
+  assert.equal(clampChatRatio(200, total, CHAT_MIN), 0.25)
+})
+
+test('clampChatRatio falls back to 50/50 when the body cannot hold two pills', () => {
+  assert.equal(clampChatRatio(10, 100, CHAT_MIN), 0.5)
+  assert.equal(clampChatRatio(90, 100, CHAT_MIN), 0.5)
+  assert.equal(clampChatRatio(50, 0, CHAT_MIN), 0.5)
+  assert.equal(clampChatRatio(50, -1, CHAT_MIN), 0.5)
+})
+
+// ----------------------------------------------------------------------
+// Injected preview click handler (WS_PREVIEW_NAV_SCRIPT). This is the source-
+// level fix for the shell-drawer-corruption bug: a sandboxed srcdoc iframe
+// shares the browser's single session history with the top shell, so a native
+// `<a href="#x">` click pushes a phantom history entry that desyncs the shell's
+// back-stack. The script must intercept #anchor clicks, scroll in-frame, and
+// preventDefault — never performing a fragment navigation. We run the script in
+// a minimal DOM/event mock and exercise its installed click handler.
+// ----------------------------------------------------------------------
+function runNavScript() {
+  let clickHandler = null
+  const scrolled = []
+  const posted = []
+  const elementsById = {}
+  const doc = {
+    addEventListener: (type, fn, capture) => {
+      if (type === 'click' && capture === true) clickHandler = fn
+    },
+    getElementById: (id) => elementsById[id] || null,
+    querySelector: () => null,
+  }
+  const win = {
+    parent: { postMessage: (msg) => posted.push(msg) },
+    CSS: { escape: (s) => s },
+  }
+  // eslint-disable-next-line no-new-func
+  const fn = new Function('document', 'window', 'CSS', WS_PREVIEW_NAV_SCRIPT)
+  fn(doc, win, win.CSS)
+  const makeAnchor = (attrs, opts = {}) => {
+    const el = {
+      _attrs: attrs,
+      getAttribute: (k) => (k in attrs ? attrs[k] : null),
+      closest(sel) {
+        if (sel === 'a[data-ws-internal]') return 'data-ws-internal' in attrs ? this : null
+        if (sel === 'a[href^="#"]') return (attrs.href || '').startsWith('#') ? this : null
+        return null
+      },
+      scrollIntoView: () => scrolled.push(el),
+      ...opts,
+    }
+    return el
+  }
+  const click = (target) => {
+    let defaultPrevented = false
+    clickHandler({ target, preventDefault: () => { defaultPrevented = true } })
+    return defaultPrevented
+  }
+  return { click, makeAnchor, scrolled, posted, elementsById }
+}
+
+test('nav-script intercepts #anchor clicks: scrolls in-frame, no history-pushing nav', () => {
+  const h = runNavScript()
+  h.elementsById.book = { scrollIntoView: () => h.scrolled.push('book') }
+  const anchor = h.makeAnchor({ href: '#book' })
+  // The mocked target IS the anchor; closest('a[data-ws-internal]') misses,
+  // closest('a[href^="#"]') hits — the #anchor branch runs.
+  const target = { closest: anchor.closest.bind(anchor) }
+  const prevented = h.click(target)
+  // Default prevented (so the browser never performs the fragment navigation
+  // that would push a phantom entry into the shared session history) and the
+  // resolved element was scrolled into view instead.
+  assert.equal(prevented, true)
+  assert.deepEqual(h.scrolled, ['book'])
+  // No postMessage: a pure #anchor is handled entirely in-frame.
+  assert.equal(h.posted.length, 0)
+})
+
+test('nav-script still routes data-ws-internal page links via postMessage', () => {
+  const h = runNavScript()
+  const anchor = h.makeAnchor({ 'data-ws-internal': 'build/site/about/index.html', href: 'about/' })
+  const target = { closest: anchor.closest.bind(anchor) }
+  const prevented = h.click(target)
+  assert.equal(prevented, true)
+  assert.deepEqual(h.posted, [{ type: 'ws-preview-nav', path: 'build/site/about/index.html' }])
+})
+
+test('nav-script ignores clicks that hit no link', () => {
+  const h = runNavScript()
+  const target = { closest: () => null }
+  const prevented = h.click(target)
+  assert.equal(prevented, false)
+  assert.equal(h.scrolled.length, 0)
+  assert.equal(h.posted.length, 0)
+})
+
+test('nav-script preventDefaults a bare "#" with no target (still no nav)', () => {
+  const h = runNavScript()
+  const anchor = h.makeAnchor({ href: '#' })
+  const target = { closest: anchor.closest.bind(anchor) }
+  const prevented = h.click(target)
+  assert.equal(prevented, true)
+  assert.equal(h.scrolled.length, 0)
+  assert.equal(h.posted.length, 0)
 })

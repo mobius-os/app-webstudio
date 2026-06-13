@@ -467,14 +467,45 @@ export function anchorActionFor(href, pageEntry) {
 const PREVIEW_TEXT_EXTS = new Set(['css', 'js', 'mjs', 'json', 'svg'])
 
 // In-preview page navigation: the injected click handler postMessages the
-// resolved build/site/ path of a same-site page link up to HtmlPreview.
+// resolved build/site/ path of a same-site page link up to HtmlPreview. It ALSO
+// owns in-page #anchor scrolling, because a native fragment navigation in this
+// frame is a footgun, not a convenience:
+//
+// The preview is a sandboxed srcdoc iframe, but a sandboxed iframe still SHARES
+// the browser's single joint session history with the top shell. A native
+// `<a href="#book">` click pushes a REAL entry into that shared history. The
+// Möbius shell's drawer/back-stack model assumes it exclusively owns session
+// history (openDrawer pushState, back-gesture → history.back()), so each phantom
+// entry the preview injects desyncs the shell — the owner's Android back gesture
+// unwinds preview fragments instead of closing the drawer / leaving the app, and
+// (observed on prod) the same nested-sandbox history mutation can force the whole
+// app frame to reload into a "no init message" timeout. So we intercept bare
+// #fragment clicks, scroll the target into view ourselves, and preventDefault —
+// the visual jump still happens, but no history entry is pushed.
 const WS_PREVIEW_NAV_TYPE = 'ws-preview-nav'
-const WS_PREVIEW_NAV_SCRIPT = `
+export const WS_PREVIEW_NAV_SCRIPT = `
 document.addEventListener('click', function (event) {
-  var link = event.target && event.target.closest ? event.target.closest('a[data-ws-internal]') : null
-  if (!link) return
+  if (!event.target || !event.target.closest) return
+  var internal = event.target.closest('a[data-ws-internal]')
+  if (internal) {
+    event.preventDefault()
+    window.parent.postMessage({ type: '${WS_PREVIEW_NAV_TYPE}', path: internal.getAttribute('data-ws-internal') }, '*')
+    return
+  }
+  // Bare #fragment link: scroll in-frame instead of letting the browser push a
+  // history entry into the session history the shell back-stack relies on.
+  var anchor = event.target.closest('a[href^="#"]')
+  if (!anchor) return
+  var hash = anchor.getAttribute('href') || ''
+  if (hash === '#' || hash.length < 2) { event.preventDefault(); return }
+  var id = decodeURIComponent(hash.slice(1))
+  var target = null
+  try { target = document.getElementById(id) } catch (e) { target = null }
+  if (!target) {
+    try { target = document.querySelector('a[name="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]') } catch (e) { target = null }
+  }
   event.preventDefault()
-  window.parent.postMessage({ type: '${WS_PREVIEW_NAV_TYPE}', path: link.getAttribute('data-ws-internal') }, '*')
+  if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }, true)
 `
 
@@ -631,8 +662,16 @@ function HtmlPreview({ storage, entryPath, version }) {
           try { style.textContent = await rewriteCssUrls(style.textContent) } catch { /* keep as-is */ }
         }
 
-        // <script src="..."> → fetch the JS, re-point src at a blob URL so it
-        // executes inside the sandbox (a relative src has no origin to resolve).
+        // <script src="..."> → fetch the JS and inline it AS TEXT (drop the
+        // src), exactly like <link rel=stylesheet> is inlined into a <style>
+        // above. A blob: URL src is the obvious move but it is silently broken
+        // here: the preview is a sandboxed srcdoc with NO allow-same-origin, so
+        // its document origin is opaque/null and the browser FORBIDS loading a
+        // blob: (or any) URL from a null-origin document ("Not allowed to load
+        // local resource: blob:… @ about:srcdoc"). The site's JS — and every
+        // link/interaction it wires up — then never runs in the preview. Inline
+        // <script> text executes under allow-scripts with no origin needed, so
+        // setting textContent and removing src restores the site's behavior.
         for (const script of Array.from(doc.querySelectorAll('script[src]'))) {
           const sitePath = resolveSiteAsset(script.getAttribute('src'), pageEntry)
           if (!sitePath) continue
@@ -640,9 +679,8 @@ function HtmlPreview({ storage, entryPath, version }) {
             const js = await textFor(sitePath)
             if (cancelled) return
             if (js == null) continue
-            const type = (script.getAttribute('type') || 'text/javascript') || 'text/javascript'
-            const blob = new Blob([js], { type: type.includes('module') ? 'text/javascript' : type })
-            script.setAttribute('src', track(URL.createObjectURL(blob)))
+            script.textContent = js
+            script.removeAttribute('src')
           } catch { /* keep the original src */ }
         }
 
@@ -906,6 +944,34 @@ function ChatBubbleIcon({ size = 20 }) {
       stroke="currentColor" strokeWidth="2" strokeLinecap="round"
       strokeLinejoin="round" aria-hidden>
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  )
+}
+
+// The app's brand mark, drawn inline so the top-bar logo paints instantly with
+// zero network — the previous <img src="/api/apps/<id>/icon"> fetched the
+// full-res PNG at runtime just to fill a 28px slot (and flashed a fallback ☰
+// while it loaded or 404'd). A browser window (title bar + traffic-light dots)
+// with an angle-bracket cue reads as "build a website in a browser" at toolbar
+// size. Currentcolor stroke so it inherits the theme; the body fills with
+// var(--bg) so the bracket stays legible against the surface.
+function WebStudioLogoIcon({ size = 28 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size}
+      role="img" aria-hidden focusable="false">
+      <rect x="3" y="4.5" width="18" height="15" rx="2"
+        fill="var(--bg)" stroke="currentColor" strokeWidth="1.6"
+        strokeLinejoin="round" />
+      {/* Browser title bar with three traffic-light dots. */}
+      <path d="M3 8.5h18" stroke="currentColor" strokeWidth="1.6"
+        strokeLinecap="round" />
+      <circle cx="6" cy="6.5" r="0.7" fill="currentColor" />
+      <circle cx="8.4" cy="6.5" r="0.7" fill="currentColor" />
+      <circle cx="10.8" cy="6.5" r="0.7" fill="currentColor" />
+      {/* Angle-bracket cue: < /> centred in the page area. */}
+      <path d="m10.5 12-1.8 1.8 1.8 1.8M13.5 12l1.8 1.8-1.8 1.8"
+        fill="none" stroke="currentColor" strokeWidth="1.6"
+        strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
@@ -1720,6 +1786,31 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 
+// The chat pane must never collapse smaller than the embedded composer's input
+// pill — the owner spec is "down to the top of the input pill but not more and
+// not less". The embed runs the real ChatView in an opaque iframe and publishes
+// no composer-height var, so we floor the pane at the standard Möbius composer
+// pill height (~64px) plus the divider (10px). The message list above the pill
+// can collapse to zero; the pill itself always stays fully visible and usable.
+// The same floor caps the OTHER end so the editor/preview never fully eats the
+// chat. Same constants + helper as app-latex / app-editor.
+const CHAT_PILL_MIN_PX = 64
+const CHAT_DIVIDER_PX = 10
+const CHAT_PANE_MIN_PX = CHAT_PILL_MIN_PX + CHAT_DIVIDER_PX
+
+// Clamp a desired chat-pane height (px) into [pill, total - pill] and return it
+// as a 0..1 ratio of the body. When the body is shorter than two pills, fall
+// back to a 50/50 split so neither pane vanishes. Pure — unit-testable.
+export function clampChatRatio(desiredPx, total, minPx) {
+  if (!(total > 0)) return 0.5
+  const floor = minPx
+  const ceil = total - minPx
+  // Body too short to honor both floors: split evenly rather than clip a pill.
+  if (ceil <= floor) return 0.5
+  const px = Math.max(floor, Math.min(ceil, desiredPx))
+  return px / total
+}
+
 function fileCacheKey(appId) {
   return `webstudio:${appId}:files-cache:v${FILE_CACHE_VERSION}`
 }
@@ -2125,9 +2216,6 @@ export default function App({ appId, token }) {
   const [navOpen, setNavOpen] = useState(false)
   const navHandleRef = useRef(null)
   const navToggleRef = useRef(null)
-  // Fall back to the ☰ glyph if the app has no custom icon (the /icon route
-  // 404s) so the drawer toggle never renders a broken-image box.
-  const [iconBroken, setIconBroken] = useState(false)
   const [selectedPath, setSelectedPath] = useState(() => cached?.lastPath || null)
   const [fileContent, setFileContent] = useState('')
   const [fileLoading, setFileLoading] = useState(false)
@@ -2174,10 +2262,6 @@ export default function App({ appId, token }) {
     })
   }, [])
 
-  const resizeChatBy = useCallback((deltaRatio) => {
-    setChatRatio((value) => Math.max(0.05, Math.min(0.95, value + deltaRatio)))
-  }, [])
-
   const beginChatResize = useCallback((event) => {
     event.preventDefault()
     const body = bodyRef.current
@@ -2186,39 +2270,60 @@ export default function App({ appId, token }) {
     if (!total) return
 
     const startY = event.clientY
-    const startRatio = chatRatio
+    const startRatioPx = total * chatRatio
+    const divider = event.currentTarget
+    const pointerId = event.pointerId
 
     // Capture the pointer so the drag survives crossing the preview iframe.
-    event.currentTarget.setPointerCapture(event.pointerId)
+    divider.setPointerCapture?.(pointerId)
 
     const onMove = (moveEvent) => {
-      const nextRatio = Math.max(0.05, Math.min(0.95, startRatio + (startY - moveEvent.clientY) / total))
-      setChatRatio(nextRatio)
+      // Px-bounded, not fractional: dragging all the way down collapses the
+      // chat to exactly the composer pill (CHAT_PANE_MIN_PX) and no smaller;
+      // dragging all the way up leaves at least one pill of editor/preview.
+      const desiredPx = startRatioPx + startY - moveEvent.clientY
+      setChatRatio(clampChatRatio(desiredPx, total, CHAT_PANE_MIN_PX))
     }
 
-    const onUp = () => {
+    // One teardown for every way the drag can end. pointerup is the normal
+    // case, but an interrupted drag (incoming notification, system gesture
+    // cancel, focus steal) fires pointercancel / lostpointercapture instead;
+    // without handling those the move listener and the pointer capture leak.
+    const endDrag = () => {
       window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', endDrag)
+      window.removeEventListener('pointercancel', endDrag)
+      divider.removeEventListener('lostpointercapture', endDrag)
+      try { divider.releasePointerCapture?.(pointerId) } catch {}
     }
 
     window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp, { once: true })
+    window.addEventListener('pointerup', endDrag)
+    window.addEventListener('pointercancel', endDrag)
+    divider.addEventListener('lostpointercapture', endDrag)
   }, [chatRatio])
 
   const handleResizeKey = useCallback((event) => {
+    const total = bodyRef.current?.getBoundingClientRect().height || 0
+    if (!total) return
+    // Same px floor as the drag path: Home collapses the chat to exactly the
+    // composer pill, End leaves one pill of editor/preview; Arrows step by ~6%
+    // but can never cross either floor (clampChatRatio enforces both ends).
+    const step = total * 0.06
     if (event.key === 'ArrowUp') {
       event.preventDefault()
-      resizeChatBy(0.04)
+      setChatRatio((r) => clampChatRatio(r * total + step, total, CHAT_PANE_MIN_PX))
     } else if (event.key === 'ArrowDown') {
       event.preventDefault()
-      resizeChatBy(-0.04)
+      setChatRatio((r) => clampChatRatio(r * total - step, total, CHAT_PANE_MIN_PX))
     } else if (event.key === 'Home') {
       event.preventDefault()
-      setChatRatio(0.05)
+      setChatRatio(clampChatRatio(0, total, CHAT_PANE_MIN_PX))
     } else if (event.key === 'End') {
       event.preventDefault()
-      setChatRatio(0.95)
+      setChatRatio(clampChatRatio(total, total, CHAT_PANE_MIN_PX))
     }
-  }, [resizeChatBy])
+  }, [])
 
   useEffect(() => {
     writeFileCache(appId, files, fileCache, selectedPath)
@@ -3139,18 +3244,7 @@ export default function App({ appId, token }) {
             aria-label={navOpen ? 'Close file drawer' : 'Open file drawer'}
             aria-expanded={navOpen}
           >
-            {iconBroken ? (
-              '☰'
-            ) : (
-              <img
-                src={`/api/apps/${appId}/icon`}
-                width={28}
-                height={28}
-                alt=""
-                style={{ borderRadius: 6, display: 'block' }}
-                onError={() => setIconBroken(true)}
-              />
-            )}
+            <WebStudioLogoIcon size={28} />
           </button>
           <div className="ws-top-title">
             {openName
