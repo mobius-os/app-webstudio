@@ -71,12 +71,31 @@ test('page and directory links are in-preview navigations', () => {
   assert.deepEqual(anchorActionFor('/docs', ROOT_PAGE), { kind: 'internal', target: 'build/site/docs/index.html' })
 })
 
-test('external links open a new tab; anchors and scheme links keep native behavior', () => {
+test('external links open a new tab; anchors and allowlisted schemes keep native behavior', () => {
   assert.deepEqual(anchorActionFor('https://example.com', ROOT_PAGE), { kind: 'external' })
   assert.deepEqual(anchorActionFor('//example.com/page', ROOT_PAGE), { kind: 'external' })
   assert.deepEqual(anchorActionFor('#section', ROOT_PAGE), { kind: 'keep' })
   assert.deepEqual(anchorActionFor('mailto:hi@example.com', ROOT_PAGE), { kind: 'keep' })
   assert.deepEqual(anchorActionFor('tel:+123', ROOT_PAGE), { kind: 'keep' })
+})
+
+test('about page is an in-preview internal navigation', () => {
+  assert.deepEqual(anchorActionFor('/about', ROOT_PAGE), { kind: 'internal', target: 'build/site/about/index.html' })
+  assert.deepEqual(anchorActionFor('about.html', ROOT_PAGE), { kind: 'internal', target: 'build/site/about.html' })
+})
+
+test('dangerous schemes are neutralised, never kept live', () => {
+  // The scheme policy is an allowlist (mailto, tel) — any other scheme,
+  // especially the dangerous ones, must have its href stripped. The preview
+  // iframe runs with allow-scripts (no allow-same-origin), so a live
+  // `javascript:` href would still execute inside the sandbox; neutralising
+  // is defense in depth regardless of the sandbox flags.
+  assert.deepEqual(anchorActionFor('javascript:alert(1)', ROOT_PAGE), { kind: 'neutralise' })
+  assert.deepEqual(anchorActionFor('JavaScript:alert(1)', ROOT_PAGE), { kind: 'neutralise' }) // case-insensitive
+  assert.deepEqual(anchorActionFor('data:text/html,<script>1</script>', ROOT_PAGE), { kind: 'neutralise' })
+  assert.deepEqual(anchorActionFor('vbscript:msgbox(1)', ROOT_PAGE), { kind: 'neutralise' })
+  assert.deepEqual(anchorActionFor('blob:https://x/abc', ROOT_PAGE), { kind: 'neutralise' })
+  assert.deepEqual(anchorActionFor('file:///etc/passwd', ROOT_PAGE), { kind: 'neutralise' })
 })
 
 test('any schemeless href that fails to resolve is neutralised, never left live', () => {

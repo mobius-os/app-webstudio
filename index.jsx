@@ -358,7 +358,8 @@ function ImagePreview({ storage, path }) {
 //   - every OTHER schemeless link — a non-page asset, a ref that escapes the
 //     site, anything unresolvable — is neutralised (href removed, inert
 //     click) rather than left to natively navigate the frame away. Only
-//     #anchors and scheme'd links (mailto:, tel:, …) keep native behavior.
+//     #anchors and ALLOWLISTED schemes (mailto:, tel:) keep native behavior;
+//     dangerous schemes (javascript:, data:, vbscript:, …) are neutralised.
 // The full policy is anchorActionFor below.
 //
 // `version` (the build token) is in the deps so a rebuild that produces
@@ -422,13 +423,26 @@ export function resolveSiteAsset(ref, entryPath) {
 //                                          like about/ or /docs resolve to
 //                                          their index page): in-preview
 //                                          navigation via the injected script
-//   { kind: 'keep' }                     → #anchor or scheme'd link (mailto:,
-//                                          tel:, data:, …) whose native
+//   { kind: 'keep' }                     → #anchor or an ALLOWLISTED scheme
+//                                          (mailto:, tel:) whose native
 //                                          behavior is already safe
 //   { kind: 'neutralise' }               → everything else — same-site
 //                                          non-page asset, ref escaping the
-//                                          site, empty or query-only href —
-//                                          drop the href so the click is inert
+//                                          site, empty or query-only href, AND
+//                                          any non-allowlisted scheme
+//                                          (javascript:, data:, vbscript:,
+//                                          blob:, file:, …) — drop the href so
+//                                          the click is inert
+//
+// Scheme policy is allowlist, not denylist: only the schemes we have vetted as
+// safe to navigate natively (mailto, tel) keep their href. http(s) and
+// protocol-relative are handled as 'external' above. EVERY other scheme is
+// neutralised — including the dangerous ones (javascript:, data:, vbscript:)
+// that could execute in or escape the preview. The srcdoc iframe runs with
+// `allow-scripts` (no allow-same-origin), so a live `javascript:` href would
+// still execute inside the sandbox; stripping the href is defense in depth so
+// the policy holds regardless of the sandbox flags or where the preview runs.
+const KEEP_SCHEMES = new Set(['mailto', 'tel'])
 export function anchorActionFor(href, pageEntry) {
   const raw = typeof href === 'string' ? href.trim() : ''
   if (/^(?:https?:)?\/\//i.test(raw)) return { kind: 'external' }
@@ -440,7 +454,13 @@ export function anchorActionFor(href, pageEntry) {
     if (!leaf.includes('.')) return { kind: 'internal', target: `${sitePath}/index.html` }
     return { kind: 'neutralise' }
   }
-  if (raw.startsWith('#') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return { kind: 'keep' }
+  if (raw.startsWith('#')) return { kind: 'keep' }
+  const schemeMatch = raw.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/)
+  if (schemeMatch) {
+    return KEEP_SCHEMES.has(schemeMatch[1].toLowerCase())
+      ? { kind: 'keep' }
+      : { kind: 'neutralise' }
+  }
   return { kind: 'neutralise' }
 }
 
