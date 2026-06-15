@@ -3852,14 +3852,38 @@ const CSS = `
   color: var(--muted);
   cursor: pointer;
   opacity: 0.5;
-  transition: opacity 0.12s ease, color 0.12s ease;
+  transition: opacity 0.12s, color 0.12s, background 0.12s, transform 0.08s;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 .ws-tree-row:hover .ws-tree-menu-btn,
 .ws-tree-menu-btn:focus-visible { opacity: 1; }
-.ws-tree-menu-btn:hover { color: var(--text); }
-.ws-tree-menu-btn:active { color: var(--accent); }
+/* Hover is a NEUTRAL grey wash (same family as the press), not an accent
+   tint — accent is reserved for the open state below. */
+.ws-tree-menu-btn:hover {
+  background: var(--surface);
+}
+/* Pressed — NEUTRAL feedback. The press must not re-assert the open-state
+   accent; it acknowledges the tap with a grey wash + scale (touch has no
+   hover, and tap-highlight is suppressed), matching the shell kebab. */
+.ws-tree-menu-btn:active {
+  background: var(--surface);
+  transform: scale(0.92);
+}
+.ws-tree-menu-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Open trigger — accent is reserved for the open menu only. While this row's
+   action menu is open the kebab stays lit and accent-tinted (and fully
+   opaque), the same treatment the shell drawer's kebab gets via
+   data-state="open". Because background is in the transition, the wash fades
+   in lockstep with the color instead of snapping (the #6 flash fix). */
+.ws-tree-menu-btn[data-state="open"] {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--accent-dim, color-mix(in srgb, var(--accent) 12%, transparent));
+}
 @media (hover: none) {
   .ws-tree-menu-btn { opacity: 1; }
 }
