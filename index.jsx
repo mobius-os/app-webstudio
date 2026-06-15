@@ -3508,7 +3508,7 @@ const CSS = `
 .ws-toolbar-btn--primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #062016;
+  color: var(--accent-fg);
 }
 .ws-toolbar-btn:disabled {
   opacity: 0.5;
@@ -4147,12 +4147,12 @@ const CSS = `
 .ws-modal-btn:active { opacity: 0.8; }
 .ws-modal-btn--primary {
   background: var(--accent);
-  color: #062016;
+  color: var(--accent-fg);
   border-color: var(--accent);
 }
 .ws-modal-btn--danger {
   background: var(--danger);
-  color: #fff;
+  color: var(--accent-fg);
   border-color: var(--danger);
 }
 .ws-modal-btn--secondary { background: var(--surface); }
