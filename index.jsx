@@ -3861,12 +3861,14 @@ const CSS = `
 /* Hover is a NEUTRAL grey wash (same family as the press), not an accent
    tint — accent is reserved for the open state below. */
 .ws-tree-menu-btn:hover {
+  color: var(--text);
   background: var(--surface);
 }
 /* Pressed — NEUTRAL feedback. The press must not re-assert the open-state
    accent; it acknowledges the tap with a grey wash + scale (touch has no
    hover, and tap-highlight is suppressed), matching the shell kebab. */
 .ws-tree-menu-btn:active {
+  color: var(--text);
   background: var(--surface);
   transform: scale(0.92);
 }
