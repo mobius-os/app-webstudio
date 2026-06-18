@@ -3201,10 +3201,11 @@ export default function App({ appId, token }) {
   return (
     <div className="ws-root">
       <style>{CSS}</style>
-      {/* Three-zone top bar: left = drawer toggle + open filename, center =
-          the chat toggle, right = view toggle + Build (+ sync pill). The grid
-          is 1fr auto 1fr so the chat toggle sits in the visual centre of the
-          bar. Identical structure in app-latex (unprefixed classes). */}
+      {/* Two-zone top bar: left = drawer toggle + open filename, right =
+          [Source/Preview toggle] [Build] (sync pill) and the chat toggle as
+          the rightmost control. The grid is 1fr | auto so the left zone
+          flexes/truncates and the right zone sizes to its controls.
+          Identical structure in app-latex (unprefixed classes). */}
       <header className="ws-top-bar">
         <div className="ws-top-zone ws-top-zone--left">
           {/* The app's own glossy icon is the drawer toggle, mirroring the
@@ -3239,18 +3240,6 @@ export default function App({ appId, token }) {
               ? <span className="ws-top-path" title={selectedPath}>{openName}</span>
               : <span className="ws-top-path ws-top-path--muted">No file open</span>}
           </div>
-        </div>
-        <div className="ws-top-zone ws-top-zone--center">
-          <button
-            type="button"
-            className="ws-toolbar-btn ws-chat-toggle-btn"
-            aria-label={chatOpen ? 'Close chat' : 'Open chat'}
-            aria-pressed={chatOpen}
-            title={chatOpen ? 'Close chat' : 'Open chat'}
-            onClick={toggleChat}
-          >
-            <ChatBubbleIcon size={20} />
-          </button>
         </div>
         <div className="ws-top-zone ws-top-zone--right">
           {showHtmlControls && (
@@ -3295,6 +3284,19 @@ export default function App({ appId, token }) {
             </>
           )}
           <SyncPill online={online} pending={pending} hasRuntime={storage.hasRuntime} />
+          {/* Chat toggle is the rightmost control of the bar (moved out of the
+              old centre zone) so the action cluster reads left→right:
+              [view][Build][sync][chat]. */}
+          <button
+            type="button"
+            className="ws-toolbar-btn ws-chat-toggle-btn"
+            aria-label={chatOpen ? 'Close chat' : 'Open chat'}
+            aria-pressed={chatOpen}
+            title={chatOpen ? 'Close chat' : 'Open chat'}
+            onClick={toggleChat}
+          >
+            <ChatBubbleIcon size={20} />
+          </button>
         </div>
       </header>
 
@@ -3395,12 +3397,13 @@ const CSS = `
 /* /mobius-ui:Focus */
 
 /* mobius-ui:Toolbar v1 — keep in sync with app-latex (unprefixed) */
-/* Three-zone bar: 1fr | auto | 1fr puts the centre zone (the chat toggle) in
-   the visual middle of the bar; the side zones flex + truncate. */
+/* Two-zone bar: minmax(0,1fr) | auto lets the left zone (drawer toggle +
+   filename) flex + truncate while the right zone sizes to its action cluster
+   ([view toggle][Build][sync][chat]). */
 .ws-top-bar {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-height: 48px;
@@ -3418,7 +3421,6 @@ const CSS = `
   min-width: 0;
 }
 .ws-top-zone--left { justify-content: flex-start; }
-.ws-top-zone--center { flex: 0 0 auto; justify-content: center; }
 .ws-top-zone--right { justify-content: flex-end; }
 .ws-nav-toggle {
   flex: 0 0 auto;
@@ -3532,37 +3534,44 @@ const CSS = `
   transform-origin: center;
 }
 
-/* ---- source/preview view toggle: bare icon buttons (same recipe as
-   app-latex's .seg-toggle — no pill container; the active button carries
-   the accent tint). ---- */
+/* ---- source/preview view toggle: ONE segmented pill (same recipe as
+   app-latex's .seg-toggle). The WRAPPER carries the border + rounded
+   outline + inset track; the two segments are borderless and the active
+   one fills with a neutral raised surface (like an iOS segmented control),
+   reserving the accent tint for the Build button. ---- */
 .ws-seg-toggle {
   display: inline-flex;
   flex: 0 0 auto;
-  gap: 6px;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
 }
 .ws-seg-btn {
   width: 44px;
-  height: 44px;
-  min-height: 44px;
+  height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--text);
+  /* Borderless segments inside the pill wrapper; the wrapper owns the
+     outer border. Slightly tighter radius than the wrapper so the active
+     fill nests cleanly inside the 2px track. */
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 .ws-seg-btn--active {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  color: var(--accent);
+  background: var(--surface2, var(--surface));
+  color: var(--text);
 }
 .ws-seg-btn:active { background: var(--surface2, var(--surface)); }
 @media (hover: hover) {
-  .ws-seg-btn:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); }
+  .ws-seg-btn:hover:not(.ws-seg-btn--active) { background: var(--surface); color: var(--text); }
 }
 /* /mobius-ui:Toolbar */
 
@@ -3798,7 +3807,10 @@ const CSS = `
 .ws-drawer-tree {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 8px 0;
+  /* Side gutter so the rounded rows float as pills inset from the panel
+     edge, matching the Möbius shell drawer (.drawer__body's 8px side
+     padding) rather than sitting full-bleed against the border. */
+  padding: 8px 6px;
   overscroll-behavior: contain;
   user-select: none;
 }
@@ -3824,6 +3836,9 @@ const CSS = `
   min-width: 0;
   min-height: 44px;
   padding: 7px 12px;
+  /* Rounded pill like the shell drawer's .drawer__item (10px) — the row
+     floats inside the .ws-drawer-tree side gutter rather than full-bleed. */
+  border-radius: 10px;
   text-align: left;
   background: none;
   border: none;
@@ -3848,6 +3863,9 @@ const CSS = `
   align-items: center;
   justify-content: center;
   border: none;
+  /* Rounded hit area like the shell drawer's .drawer__more kebab (8px)
+     so its hover/open/press washes read as a rounded chip, not square. */
+  border-radius: 8px;
   background: none;
   color: var(--muted);
   cursor: pointer;
@@ -3890,21 +3908,30 @@ const CSS = `
   .ws-tree-menu-btn { opacity: 1; }
 }
 @media (hover: hover) {
+  /* Hover is a NEUTRAL surface wash — same as the shell drawer's
+     .drawer__item:hover (var(--surface)). Accent is reserved for the
+     selected/active row, not for hover. */
   .ws-tree-file:hover, .ws-tree-folder:hover {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: var(--surface);
   }
 }
+/* Keyboard focus ring — matches the shell drawer's .drawer__item
+   :focus-visible (2px accent outline, 2px offset). Replaces the old
+   inset accent bar, which we dropped along with the square selection. */
 .ws-tree-file:focus-visible, .ws-tree-folder:focus-visible {
-  box-shadow: inset 3px 0 0 var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: var(--surface);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .ws-tree-file:active, .ws-tree-folder:active {
   background: var(--surface2, var(--bg));
 }
+/* Selected row: a rounded accent wash, matching the shell drawer's
+   .drawer__item--active (var(--accent-dim) fill + accent text). No
+   square fill and no left inset bar — the shell uses the wash alone. */
 .ws-tree-file--selected {
-  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
-  color: var(--text);
-  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 .ws-tree-file--selected .ws-tree-icon { color: var(--accent); }
 /* Compact accent dot marking the main page row (no text chip). */
@@ -3942,8 +3969,10 @@ const CSS = `
   min-width: 160px;
   padding: 4px;
   background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  /* Match the shell drawer's .drawer__menu popover: softer outer radius
+     (12px) over a hairline --border-light edge. */
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
   box-shadow: 0 8px 28px var(--ws-scrim-soft);
   display: flex;
   flex-direction: column;
@@ -3957,7 +3986,9 @@ const CSS = `
   padding: 8px 10px;
   text-align: left;
   border: none;
-  border-radius: 7px;
+  /* Inner items match the shell drawer's .drawer__menu-item radius (8px)
+     so a hovered item rhymes with the row's rounded selection. */
+  border-radius: 8px;
   background: none;
   color: var(--text);
   font: 550 13px/1.2 var(--font);
