@@ -11,14 +11,33 @@ set -uo pipefail
 APP_ID="${1:-}"
 STORAGE_DIR="/data/apps/${APP_ID}"
 mkdir -p "$STORAGE_DIR/build"
-TARGET="$(cat "$STORAGE_DIR/build/target.txt" 2>/dev/null || echo "")"
+RAW_TARGET="$(cat "$STORAGE_DIR/build/target.txt" 2>/dev/null || echo "")"
+PREFIX=""
+TARGET="$RAW_TARGET"
+case "$RAW_TARGET" in
+  projects/*/files/*)
+    PROJECT_PART="${RAW_TARGET#projects/}"
+    PROJECT_ID="${PROJECT_PART%%/*}"
+    case "$PROJECT_ID" in
+      "" | *[!A-Za-z0-9_-]*)
+        TARGET=""
+        ;;
+      *)
+        PREFIX="projects/${PROJECT_ID}/"
+        TARGET="${RAW_TARGET#$PREFIX}"
+        mkdir -p "$STORAGE_DIR/${PREFIX}build"
+        ;;
+    esac
+    ;;
+esac
+BUILD_DIR="$STORAGE_DIR/${PREFIX}build"
 
 write_status() {  # $1=status $2=entry(or empty) $3=log
   # Echo the target this verdict was built FROM ($TARGET, set below). target.txt
   # + status.json are a single shared pair per app, so the app-side poller uses
   # this to ignore a verdict produced by a concurrent build of a DIFFERENT page
   # (another tab/device) instead of mapping its output onto the wrong source.
-  python3 - "$1" "$2" "$3" "$TARGET" "$STORAGE_DIR/build/status.json" <<'PY'
+  python3 - "$1" "$2" "$3" "$TARGET" "$BUILD_DIR/status.json" <<'PY'
 import json, sys, datetime
 status, entry, log, target, out = sys.argv[1:6]
 json.dump({
@@ -53,8 +72,8 @@ case "$REL" in
   *) write_status error "" "build target must be an .html page"; exit 0 ;;
 esac
 
-SRC="$STORAGE_DIR/files"
-SITE="$STORAGE_DIR/build/site"
+SRC="$STORAGE_DIR/${PREFIX}files"
+SITE="$STORAGE_DIR/${PREFIX}build/site"
 
 if [ ! -d "$SRC" ]; then
   write_status error "" "No files/ directory to build."
@@ -72,7 +91,7 @@ fi
 # folder markers are noise in the served site).
 rm -rf "$SITE"
 mkdir -p "$SITE"
-COPY_ERR="$STORAGE_DIR/build/copy.err"
+COPY_ERR="$STORAGE_DIR/${PREFIX}build/copy.err"
 if ! cp -a "$SRC/." "$SITE/" 2>"$COPY_ERR"; then
   write_status error "" "Failed to assemble site: $(cat "$COPY_ERR" 2>/dev/null || echo 'copy error')"
   rm -f "$COPY_ERR"

@@ -18,6 +18,17 @@ import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirro
 // guards (`.` / `..`, empty segments, absolute paths) so user input can never
 // escape the app's files/ tree before it reaches storage.
 const NAME_RE = /^[\w.\-/]+$/
+const PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
+
+export const projectPrefix = (id) => (id === 'default' ? '' : `projects/${id}/`)
+
+function isSafeProjectId(id) {
+  return typeof id === 'string' && PROJECT_ID_RE.test(id)
+}
+
+function prefixedPath(prefix, path) {
+  return `${prefix || ''}${path}`
+}
 
 export function isSafeRelPath(path) {
   const value = typeof path === 'string' ? path.trim() : ''
@@ -273,6 +284,53 @@ function makeStorage(appId, token) {
     if (!r.ok && r.status !== 404) throw new Error(`remove ${path} → ${r.status}`)
     return { synced: true }
   }
+  async function move(from, to) {
+    const r = await fetch(`/api/storage/apps/${appId}/move`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to }),
+    })
+    if (!r.ok) {
+      let detail = ''
+      try { detail = (await r.json()).detail || '' } catch { /* non-JSON */ }
+      const err = new Error(`move ${from} → ${to} → ${r.status}${detail ? `: ${detail}` : ''}`)
+      err.status = r.status
+      err.detail = detail
+      throw err
+    }
+    return { synced: true }
+  }
+  async function removeFolder(path) {
+    const r = await fetch(`/api/storage/apps/${appId}/folder/${path}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!r.ok && r.status !== 404) {
+      let detail = ''
+      try { detail = (await r.json()).detail || '' } catch { /* non-JSON */ }
+      const err = new Error(`remove folder ${path} → ${r.status}${detail ? `: ${detail}` : ''}`)
+      err.status = r.status
+      err.detail = detail
+      throw err
+    }
+    return { synced: true }
+  }
+  async function list(prefix = '') {
+    const out = []
+    let cursor = null
+    do {
+      const qs = new URLSearchParams({ limit: '500' })
+      if (cursor) qs.set('cursor', cursor)
+      const r = await fetch(`/api/storage/apps-list/${appId}/${prefix}?${qs.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!r.ok) throw new Error(`list ${prefix} → ${r.status}`)
+      const data = await r.json()
+      out.push(...(Array.isArray(data.entries) ? data.entries : []))
+      cursor = data.next_cursor || null
+    } while (cursor)
+    return out
+  }
   async function pendingCount() {
     if (ms && typeof ms.pendingCount === 'function') {
       try { return await ms.pendingCount() } catch { return 0 }
@@ -286,9 +344,30 @@ function makeStorage(appId, token) {
   return {
     get, getFresh, getText, getBlob,
     setText, setBlob, setJSON, remove,
+    move, removeFolder, list,
     subscribeText,
     pendingCount,
     hasRuntime,
+  }
+}
+
+function scopedStorage(storage, prefix) {
+  const p = prefix || ''
+  return {
+    get: (path) => storage.get(prefixedPath(p, path)),
+    getFresh: (path) => storage.getFresh(prefixedPath(p, path)),
+    getText: (path) => storage.getText(prefixedPath(p, path)),
+    getBlob: (path) => storage.getBlob(prefixedPath(p, path)),
+    setText: (path, text) => storage.setText(prefixedPath(p, path), text),
+    setBlob: (path, blob, options) => storage.setBlob(prefixedPath(p, path), blob, options),
+    setJSON: (path, obj) => storage.setJSON(prefixedPath(p, path), obj),
+    remove: (path) => storage.remove(prefixedPath(p, path)),
+    move: (from, to) => storage.move(prefixedPath(p, from), prefixedPath(p, to)),
+    removeFolder: (path) => storage.removeFolder(prefixedPath(p, path)),
+    list: (path = '') => storage.list(prefixedPath(p, path)),
+    subscribeText: (path, cb) => storage.subscribeText(prefixedPath(p, path), cb),
+    pendingCount: () => storage.pendingCount(),
+    hasRuntime: storage.hasRuntime,
   }
 }
 
@@ -947,6 +1026,28 @@ function ChatBubbleIcon({ size = 20 }) {
     </svg>
   )
 }
+function PublishIcon({ size = 20 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="M12 3v12" />
+      <path d="m7 8 5-5 5 5" />
+      <path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
+    </svg>
+  )
+}
+function UnpublishIcon({ size = 20 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="M12 21V9" />
+      <path d="m17 16-5 5-5-5" />
+      <path d="M5 9V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4" />
+    </svg>
+  )
+}
 
 // In-app context menu. Native context menus / window.prompt are unavailable
 // in the mini-app sandbox (no allow-modals), and a native right-click menu
@@ -1521,6 +1622,7 @@ function bootstrapPrompt() {
 
 function ChatPanel({
   appId, token, storage,
+  projectId, persistKey,
   onFilesMaybeChanged,
   quickActions, getContext,
 }) {
@@ -1550,7 +1652,8 @@ function ChatPanel({
 
     window.mobius.chat({
       mount,
-      persist: 'chat_id.json',
+      projectId: projectId === 'default' ? undefined : projectId,
+      persist: persistKey,
       title: 'Web Studio',
       systemPrompt,
       picker: true,
@@ -1575,7 +1678,7 @@ function ChatPanel({
       disposed = true
       if (handle) handle.destroy()
     }
-  }, [storage, systemPrompt])
+  }, [storage, systemPrompt, projectId, persistKey])
 
   return (
     <section className="ws-chat-panel" aria-label="Agent chat">
@@ -1670,6 +1773,14 @@ function useModal() {
     resolve,
   }), null), [openModal])
 
+  const choose = useCallback((body, opts = {}) => openModal((resolve) => ({
+    kind: 'choose',
+    title: opts.title || 'Choose',
+    body,
+    actions: Array.isArray(opts.actions) ? opts.actions : [],
+    resolve,
+  }), null), [openModal])
+
   useEffect(() => () => {
     try { navRef.current?.close?.() } catch {}
     navRef.current = null
@@ -1680,7 +1791,7 @@ function useModal() {
     <ModalView state={state} />
   ) : null
 
-  return { node, alert, confirm, prompt }
+  return { node, alert, confirm, prompt, choose }
 }
 
 // Each open modal needs a stable, unique id to wire aria-labelledby from the
@@ -1757,6 +1868,7 @@ function ModalView({ state }) {
     e.preventDefault()
     if (state.kind === 'prompt') state.resolve(value)
     else if (state.kind === 'confirm') state.resolve(true)
+    else if (state.kind === 'choose') state.resolve(null)
     else state.resolve()
   }
   return (
@@ -1776,22 +1888,39 @@ function ModalView({ state }) {
               placeholder={state.placeholder}
             />
           )}
+          {state.kind === 'choose' && (
+            <div className="ws-modal-options">
+              {(state.actions || []).map((action) => (
+                <button
+                  key={String(action.value ?? action.label)}
+                  type="button"
+                  className={`ws-modal-option ${action.danger ? 'ws-modal-option--danger' : ''}`}
+                  disabled={!!action.disabled}
+                  onClick={() => state.resolve(action.value)}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="ws-modal-actions">
-            {(state.kind === 'confirm' || state.kind === 'prompt') && (
+            {(state.kind === 'confirm' || state.kind === 'prompt' || state.kind === 'choose') && (
               <button
                 type="button"
                 className="ws-modal-btn ws-modal-btn--secondary"
-                onClick={() => state.resolve(state.kind === 'prompt' ? null : false)}
+                onClick={() => state.resolve(state.kind === 'confirm' ? false : null)}
               >
                 Cancel
               </button>
             )}
-            <button
-              type="submit"
-              className={`ws-modal-btn ${state.danger ? 'ws-modal-btn--danger' : 'ws-modal-btn--primary'}`}
-            >
-              {state.kind === 'confirm' ? (state.danger ? 'Delete' : 'OK') : 'OK'}
-            </button>
+            {state.kind !== 'choose' && (
+              <button
+                type="submit"
+                className={`ws-modal-btn ${state.danger ? 'ws-modal-btn--danger' : 'ws-modal-btn--primary'}`}
+              >
+                {state.kind === 'confirm' ? (state.danger ? 'Delete' : 'OK') : 'OK'}
+              </button>
+            )}
           </div>
         </form>
       </div>
@@ -1808,6 +1937,7 @@ const FILE_CONTENT_CACHE_LIMIT = 20
 const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
+const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
@@ -1834,8 +1964,28 @@ export function clampChatRatio(desiredPx, total, minPx) {
   return px / total
 }
 
-function fileCacheKey(appId) {
-  return `webstudio:${appId}:files-cache:v${FILE_CACHE_VERSION}`
+function activeProjectKey(appId) {
+  return `webstudio:${appId}:activeProject`
+}
+
+function readActiveProject(appId) {
+  if (typeof localStorage === 'undefined') return 'default'
+  try {
+    const stored = localStorage.getItem(activeProjectKey(appId))
+    return isSafeProjectId(stored) ? stored : 'default'
+  } catch {
+    return 'default'
+  }
+}
+
+function writeActiveProject(appId, id) {
+  if (typeof localStorage === 'undefined') return
+  try { localStorage.setItem(activeProjectKey(appId), id) } catch {}
+}
+
+function fileCacheKey(appId, projectId = 'default') {
+  if (projectId === 'default') return `webstudio:${appId}:files-cache:v${FILE_CACHE_VERSION}`
+  return `webstudio:${appId}:project:${projectId}:files-cache:v${FILE_CACHE_VERSION}`
 }
 
 function chatOpenKey(appId) {
@@ -1862,10 +2012,10 @@ function readChatRatio(appId) {
   return raw
 }
 
-function readFileCache(appId) {
+function readFileCache(appId, projectId = 'default') {
   if (typeof localStorage === 'undefined') return null
   try {
-    const raw = localStorage.getItem(fileCacheKey(appId))
+    const raw = localStorage.getItem(fileCacheKey(appId, projectId))
     if (!raw) return null
     const parsed = JSON.parse(raw)
     return normalizeFileCacheSnapshot(parsed)
@@ -1874,7 +2024,7 @@ function readFileCache(appId) {
   }
 }
 
-function writeFileCache(appId, index, contents, lastPath) {
+function writeFileCache(appId, projectId, index, contents, lastPath) {
   if (typeof localStorage === 'undefined') return
   try {
     const safeIndex = cleanIndexPaths(index)
@@ -1885,7 +2035,7 @@ function writeFileCache(appId, index, contents, lastPath) {
       .slice(-FILE_CONTENT_CACHE_LIMIT)
     for (const [p, v] of entries) trimmed[p] = v
     localStorage.setItem(
-      fileCacheKey(appId),
+      fileCacheKey(appId, projectId),
       JSON.stringify({
         index: safeIndex,
         contents: trimmed,
@@ -1895,6 +2045,50 @@ function writeFileCache(appId, index, contents, lastPath) {
   } catch {
     // Quota / disabled / serialization — leave the previous snapshot in place.
   }
+}
+
+function normalizeProjects(raw) {
+  if (!Array.isArray(raw)) return null
+  const seen = new Set()
+  const projects = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const id = item.id === 'default' ? 'default' : (isSafeProjectId(item.id) ? item.id : null)
+    if (!id || seen.has(id)) continue
+    const name = String(item.name || '').trim() || (id === 'default' ? 'Project 1' : id)
+    const createdAt = Number.isFinite(item.createdAt) ? item.createdAt : Date.now()
+    seen.add(id)
+    projects.push({ id, name, createdAt })
+  }
+  if (!seen.has('default')) {
+    projects.unshift({ id: DEFAULT_PROJECT.id, name: DEFAULT_PROJECT.name, createdAt: Date.now() })
+  }
+  return projects
+}
+
+function projectSlug(name, existingIds) {
+  const base = String(name || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+    || 'project'
+  let id = base
+  while (!isSafeProjectId(id) || existingIds.has(id)) {
+    const suffix = Math.random().toString(36).slice(2, 8)
+    id = `${base.slice(0, Math.max(1, 63 - suffix.length))}-${suffix}`.slice(0, 64)
+  }
+  return id
+}
+
+async function deleteStorageTree(storage, prefix) {
+  const entries = await storage.list(prefix)
+  for (const entry of entries) {
+    if (entry.type === 'directory') await deleteStorageTree(storage, entry.path)
+    else if (entry.type === 'file') await storage.remove(entry.path)
+  }
+  await storage.removeFolder(prefix.replace(/\/+$/, '')).catch(() => {})
 }
 
 // ----------------------------------------------------------------------
@@ -2058,7 +2252,7 @@ const SOURCE_AUTOSAVE_MS = 700
 const SOURCE_SYNC_MS = 3500
 const PROJECT_SYNC_MS = 5000
 
-function useBuild({ appId, token, storage, online }) {
+function useBuild({ appId, token, storage, rootStorage, prefix, online }) {
   const [buildStatus, setBuildStatus] = useState('idle') // idle|building|done|error
   const [buildLog, setBuildLog] = useState('')
   // Which page the current/last build is FOR. The hook tracks one build at a
@@ -2081,6 +2275,15 @@ function useBuild({ appId, token, storage, online }) {
   }, [])
 
   useEffect(() => clearPoll, [clearPoll])
+
+  useEffect(() => {
+    clearPoll()
+    buildingRef.current = false
+    setBuildStatus('idle')
+    setBuildLog('')
+    setBuildDoc(null)
+    setEntryByDoc({})
+  }, [prefix, clearPoll])
 
   const finishDone = useCallback((doc, entry) => {
     clearPoll()
@@ -2159,6 +2362,11 @@ function useBuild({ appId, token, storage, online }) {
       await storage.remove('build/status.json')
       // 1. Tell the build script which page is the entry.
       await storage.setText('build/target.txt', doc)
+      // 1b. /run-job invokes build.sh with only appId, so the script reads a
+      // root dispatch target that can point at either the legacy root project
+      // or a projects/<id>/ subtree. The actual per-project target above is
+      // still the durable storage key used by the app.
+      await rootStorage.setText('build/target.txt', `${prefix || ''}${doc}`)
       // 2. Kick the server-side job. 202 = accepted; anything else is fatal.
       const r = await fetch(`/api/apps/${appId}/run-job`, {
         method: 'POST',
@@ -2178,7 +2386,7 @@ function useBuild({ appId, token, storage, online }) {
     } catch (e) {
       finishError((e && e.message) ? e.message : 'Build failed to start.')
     }
-  }, [appId, token, storage, online, clearPoll, finishError, poll])
+  }, [appId, token, storage, rootStorage, prefix, online, clearPoll, finishError, poll])
 
   const rememberEntry = useCallback((doc, entry) => {
     if (buildingRef.current) return
@@ -2227,11 +2435,16 @@ function useBuild({ appId, token, storage, online }) {
 // Top-level app.
 // ----------------------------------------------------------------------
 export default function App({ appId, token }) {
-  const storage = useMemo(() => makeStorage(appId, token), [appId, token])
+  const rootStorage = useMemo(() => makeStorage(appId, token), [appId, token])
+  const [activeProjectId, setActiveProjectId] = useState(() => readActiveProject(appId))
+  const activePrefix = useMemo(() => projectPrefix(activeProjectId), [activeProjectId])
+  const storage = useMemo(() => scopedStorage(rootStorage, activePrefix), [rootStorage, activePrefix])
   const online = useOnline()
   const modal = useModal()
   const bodyRef = useRef(null)
-  const cached = useMemo(() => readFileCache(appId), [appId])
+  const cached = useMemo(() => readFileCache(appId, activeProjectId), [appId, activeProjectId])
+  const [projects, setProjects] = useState([])
+  const [projectsLoaded, setProjectsLoaded] = useState(false)
   const [files, setFiles] = useState(() => cached?.index || [])
   const filesRef = useRef(files)
   const [fileCache, setFileCache] = useState(() => cached?.contents || {})
@@ -2240,6 +2453,8 @@ export default function App({ appId, token }) {
   const navHandleRef = useRef(null)
   const navToggleRef = useRef(null)
   const [selectedPath, setSelectedPath] = useState(() => cached?.lastPath || null)
+  const selectedPathRef = useRef(selectedPath)
+  useEffect(() => { selectedPathRef.current = selectedPath }, [selectedPath])
   const [fileContent, setFileContent] = useState('')
   const [fileLoading, setFileLoading] = useState(false)
   const [fileError, setFileError] = useState(null)
@@ -2254,6 +2469,8 @@ export default function App({ appId, token }) {
   const [pending, setPending] = useState(0)
   const [chatOpen, setChatOpen] = useState(() => readChatOpen(appId))
   const [chatRatio, setChatRatio] = useState(() => readChatRatio(appId))
+  const [publishedUrl, setPublishedUrl] = useState(null)
+  const [publishing, setPublishing] = useState(false)
   // Viewer mode, toggled by the [Source | Preview] segmented control. 'source'
   // shows the editable CodeMirror source; 'preview' shows the MAIN page's built site.
   const [viewMode, setViewMode] = useState('source')
@@ -2261,10 +2478,14 @@ export default function App({ appId, token }) {
   // main.json and defaulted (below) to the first .html (preferring
   // files/index.html). null until the index loads + a default is resolved.
   const [mainPath, setMainPath] = useState(null)
+  const [mainReady, setMainReady] = useState(false)
   const mainPathRef = useRef(null)
   useEffect(() => { mainPathRef.current = mainPath }, [mainPath])
-  const build = useBuild({ appId, token, storage, online })
+  const mainResolvedRef = useRef(false)
+  const build = useBuild({ appId, token, storage, rootStorage, prefix: activePrefix, online })
   const seenBuildStatusRef = useRef('')
+  const activeProject = projects.find((p) => p.id === activeProjectId)
+    || { id: activeProjectId, name: activeProjectId === 'default' ? 'Project 1' : activeProjectId }
 
   useEffect(() => {
     if (typeof localStorage === 'undefined') return
@@ -2275,6 +2496,65 @@ export default function App({ appId, token }) {
     if (typeof localStorage === 'undefined') return
     try { localStorage.setItem(chatRatioKey(appId), String(chatRatio)) } catch {}
   }, [appId, chatRatio])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const stored = await rootStorage.get('projects.json')
+        let next = normalizeProjects(stored)
+        if (!next || next.length === 0) {
+          next = [{ id: DEFAULT_PROJECT.id, name: DEFAULT_PROJECT.name, createdAt: Date.now() }]
+        }
+        if (cancelled) return
+        setProjects(next)
+        setProjectsLoaded(true)
+        if (!next.some((p) => p.id === activeProjectId)) {
+          setActiveProjectId('default')
+          writeActiveProject(appId, 'default')
+        }
+        if (!stored || !Array.isArray(stored) || next.length !== stored.length) {
+          rootStorage.setJSON('projects.json', next).catch(() => {})
+        }
+      } catch {
+        if (!cancelled) {
+          const fallback = [{ id: DEFAULT_PROJECT.id, name: DEFAULT_PROJECT.name, createdAt: Date.now() }]
+          setProjects(fallback)
+          setProjectsLoaded(true)
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [appId, activeProjectId, rootStorage])
+
+  useEffect(() => {
+    const snapshot = readFileCache(appId, activeProjectId)
+    const nextFiles = snapshot?.index || []
+    filesRef.current = nextFiles
+    selectedPathRef.current = snapshot?.lastPath || null
+    mainResolvedRef.current = false
+    seenBuildStatusRef.current = ''
+    mainPathRef.current = null
+    fileContentRef.current = ''
+    fileDirtyRef.current = false
+    fileSavingRef.current = false
+    setFiles(nextFiles)
+    setFileCache(snapshot?.contents || {})
+    setIndexLoaded(false)
+    setSelectedPath(snapshot?.lastPath || null)
+    setFileContent('')
+    setFileLoading(false)
+    setFileError(null)
+    setFileDirty(false)
+    setFileSaving(false)
+    setMainPath(null)
+    setMainReady(false)
+    setViewMode('source')
+    setPublishedUrl(null)
+    try { navHandleRef.current?.close?.() } catch {}
+    navHandleRef.current = null
+    setNavOpen(false)
+  }, [appId, activeProjectId])
 
   const toggleChat = useCallback(() => {
     setChatOpen((open) => {
@@ -2349,12 +2629,10 @@ export default function App({ appId, token }) {
   }, [])
 
   useEffect(() => {
-    writeFileCache(appId, files, fileCache, selectedPath)
-  }, [appId, files, fileCache, selectedPath])
+    writeFileCache(appId, activeProjectId, files, fileCache, selectedPath)
+  }, [appId, activeProjectId, files, fileCache, selectedPath])
 
   useEffect(() => { filesRef.current = files }, [files])
-  const selectedPathRef = useRef(selectedPath)
-  useEffect(() => { selectedPathRef.current = selectedPath }, [selectedPath])
 
   const refreshPending = useCallback(async () => {
     try {
@@ -2443,8 +2721,7 @@ export default function App({ appId, token }) {
 
   useEffect(() => {
     refreshFiles()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [activeProjectId, refreshFiles])
 
   // Pick a sensible default main page: files/index.html if present, else the
   // first .html alphabetically, else null.
@@ -2453,8 +2730,6 @@ export default function App({ appId, token }) {
     return list.find((p) => isHtmlDoc(p)) || null
   }, [])
 
-  const mainResolvedRef = useRef(false)
-  const [mainReady, setMainReady] = useState(false)
   useEffect(() => {
     if (!indexLoaded || mainResolvedRef.current) return
     let cancelled = false
@@ -2932,21 +3207,7 @@ export default function App({ appId, token }) {
       return
     }
     try {
-      const r = await fetch(`/api/storage/apps/${appId}/move`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from, to }),
-      })
-      if (!r.ok) {
-        let detail = ''
-        try { detail = (await r.json()).detail || '' } catch { /* non-JSON */ }
-        if (r.status === 409) {
-          await modal.alert('Something already exists at the destination.', { title: 'Move failed' })
-        } else {
-          await modal.alert(`Move failed (${r.status}${detail ? `: ${detail}` : ''}).`, { title: 'Move failed' })
-        }
-        return
-      }
+      await storage.move(from, to)
       const rewrite = (p) => {
         if (p === from) return to
         if (p.startsWith(`${from}/`)) return to + p.slice(from.length)
@@ -2971,9 +3232,13 @@ export default function App({ appId, token }) {
       }
       refreshPending()
     } catch (e) {
-      await modal.alert(e.message || String(e), { title: 'Move failed' })
+      if (e.status === 409) {
+        await modal.alert('Something already exists at the destination.', { title: 'Move failed' })
+      } else {
+        await modal.alert(e.message || String(e), { title: 'Move failed' })
+      }
     }
-  }, [appId, token, storage, modal, refreshPending, ensureIndexWritable, build])
+  }, [storage, modal, refreshPending, ensureIndexWritable, build])
 
   const handleRename = useCallback(async (path) => {
     const parts = path.split('/')
@@ -3007,16 +3272,7 @@ export default function App({ appId, token }) {
     )
     if (!ok) return
     try {
-      const r = await fetch(`/api/storage/apps/${appId}/folder/${folderPath}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!r.ok && r.status !== 404) {
-        let detail = ''
-        try { detail = (await r.json()).detail || '' } catch { /* non-JSON */ }
-        await modal.alert(`Could not delete folder (${r.status}${detail ? `: ${detail}` : ''}).`, { title: 'Delete failed' })
-        return
-      }
+      await storage.removeFolder(folderPath)
       const under = (p) => p === folderPath || p.startsWith(`${folderPath}/`)
       const next = filesRef.current.filter((p) => !under(p))
       await storage.setJSON('files-index.json', next)
@@ -3035,7 +3291,7 @@ export default function App({ appId, token }) {
     } catch (e) {
       await modal.alert(e.message || String(e), { title: 'Delete failed' })
     }
-  }, [appId, token, storage, modal, refreshPending, ensureIndexWritable, build])
+  }, [storage, modal, refreshPending, ensureIndexWritable, build])
 
   const selectedExt = selectedPath ? extensionFor(selectedPath) : ''
   const selectedIsBinary = selectedPath ? isBinaryProjectPath(selectedPath) : false
@@ -3118,6 +3374,190 @@ export default function App({ appId, token }) {
       setFileSaving(false)
     }
   }, [selectedPath, selectedIsBinary, fileSaving, storage, fileContent, refreshPending])
+
+  const switchProject = useCallback(async (id) => {
+    if (!isSafeProjectId(id) || id === activeProjectId) return
+    if (fileDirty && !fileSaving && canEditSelected) {
+      await handleSaveFile()
+    }
+    writeActiveProject(appId, id)
+    setActiveProjectId(id)
+  }, [activeProjectId, appId, canEditSelected, fileDirty, fileSaving, handleSaveFile])
+
+  const handleProjectMenu = useCallback(async () => {
+    if (!projectsLoaded) {
+      await modal.alert('Projects are still loading.', { title: 'Projects' })
+      return
+    }
+    const action = await modal.choose(`Active project: ${activeProject.name}`, {
+      title: 'Projects',
+      actions: [
+        { label: 'New Project', value: 'new' },
+        { label: 'Switch Project', value: 'switch', disabled: projects.length < 2 },
+        { label: 'Rename Project', value: 'rename' },
+        { label: 'Delete Project', value: 'delete', danger: true, disabled: activeProjectId === 'default' || projects.length <= 1 },
+      ],
+    })
+    if (!action) return
+    if (action === 'switch') {
+      const nextId = await modal.choose('Choose a project to open.', {
+        title: 'Switch Project',
+        actions: projects.map((p) => ({
+          label: p.id === activeProjectId ? `${p.name} (current)` : p.name,
+          value: p.id,
+          disabled: p.id === activeProjectId,
+        })),
+      })
+      if (nextId) await switchProject(nextId)
+      return
+    }
+    if (action === 'new') {
+      const name = await modal.prompt('Project name', {
+        title: 'New Project',
+        placeholder: `Project ${projects.length + 1}`,
+      })
+      const clean = String(name || '').trim()
+      if (!clean) return
+      const id = projectSlug(clean, new Set(projects.map((p) => p.id)))
+      const next = [...projects, { id, name: clean, createdAt: Date.now() }]
+      try {
+        await rootStorage.setJSON('projects.json', next)
+        setProjects(next)
+        await switchProject(id)
+      } catch (e) {
+        await modal.alert(e.message || String(e), { title: 'Could not create project' })
+      }
+      return
+    }
+    if (action === 'rename') {
+      const name = await modal.prompt('Project name', {
+        title: 'Rename Project',
+        defaultValue: activeProject.name,
+      })
+      const clean = String(name || '').trim()
+      if (!clean || clean === activeProject.name) return
+      const next = projects.map((p) => (p.id === activeProjectId ? { ...p, name: clean } : p))
+      try {
+        await rootStorage.setJSON('projects.json', next)
+        setProjects(next)
+      } catch (e) {
+        await modal.alert(e.message || String(e), { title: 'Could not rename project' })
+      }
+      return
+    }
+    if (action === 'delete') {
+      if (activeProjectId === 'default' || projects.length <= 1) {
+        await modal.alert('The default project and the last remaining project cannot be deleted.', { title: 'Cannot delete project' })
+        return
+      }
+      const ok = await modal.confirm(
+        `Delete “${activeProject.name}” and all of its files, builds, and chat history? This cannot be undone.`,
+        { title: 'Delete Project', danger: true },
+      )
+      if (!ok) return
+      const fallback = projects.find((p) => p.id !== activeProjectId)?.id || 'default'
+      const next = projects.filter((p) => p.id !== activeProjectId)
+      try {
+        await deleteStorageTree(rootStorage, projectPrefix(activeProjectId))
+        await rootStorage.setJSON('projects.json', next)
+        setProjects(next)
+        writeActiveProject(appId, fallback)
+        setActiveProjectId(fallback)
+      } catch (e) {
+        await modal.alert(e.message || String(e), { title: 'Could not delete project' })
+      }
+    }
+  }, [
+    activeProject,
+    activeProjectId,
+    appId,
+    modal,
+    projects,
+    projectsLoaded,
+    rootStorage,
+    switchProject,
+  ])
+
+  const showPublishedModal = useCallback(async (fullUrl) => {
+    await modal.alert(
+      <div>
+        <div className="ws-publish-url">{fullUrl}</div>
+        <div className="ws-publish-actions">
+          <button
+            type="button"
+            className="ws-modal-btn ws-modal-btn--secondary"
+            onClick={() => navigator.clipboard?.writeText(fullUrl).catch(() => {})}
+          >
+            Copy
+          </button>
+          <a className="ws-modal-btn ws-modal-btn--primary ws-publish-link" href={fullUrl} target="_blank" rel="noopener noreferrer">
+            Open
+          </a>
+        </div>
+      </div>,
+      { title: 'Published' },
+    )
+  }, [modal])
+
+  const handlePublish = useCallback(async () => {
+    if (publishing) return
+    setPublishing(true)
+    try {
+      const r = await fetch(`/api/apps/${appId}/publish`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: activeProjectId === 'default' ? null : activeProjectId }),
+      })
+      if (r.ok) {
+        const data = await r.json()
+        const fullUrl = new URL(data.url, window.location.origin).href
+        setPublishedUrl(fullUrl)
+        await showPublishedModal(fullUrl)
+        return
+      }
+      if (r.status === 400) {
+        await modal.alert('No built site found — please Build first', { title: 'Publish failed' })
+        return
+      }
+      let detail = ''
+      try {
+        const data = await r.json()
+        detail = data.detail || data.error || ''
+      } catch { /* non-JSON */ }
+      await modal.alert(detail || `Publish failed (${r.status}).`, { title: 'Publish failed' })
+    } catch (e) {
+      await modal.alert(e.message || String(e), { title: 'Publish failed' })
+    } finally {
+      setPublishing(false)
+    }
+  }, [activeProjectId, appId, modal, publishing, showPublishedModal, token])
+
+  const handleUnpublish = useCallback(async () => {
+    if (publishing) return
+    setPublishing(true)
+    try {
+      const projectParam = activeProjectId === 'default' ? '' : activeProjectId
+      const r = await fetch(`/api/apps/${appId}/publish?project_id=${encodeURIComponent(projectParam)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (r.ok) {
+        setPublishedUrl(null)
+        await modal.alert('The published site was removed.', { title: 'Unpublished' })
+        return
+      }
+      let detail = ''
+      try {
+        const data = await r.json()
+        detail = data.detail || data.error || ''
+      } catch { /* non-JSON */ }
+      await modal.alert(detail || `Unpublish failed (${r.status}).`, { title: 'Unpublish failed' })
+    } catch (e) {
+      await modal.alert(e.message || String(e), { title: 'Unpublish failed' })
+    } finally {
+      setPublishing(false)
+    }
+  }, [activeProjectId, appId, modal, publishing, token])
 
   const handleBuild = useCallback(() => {
     // Build always assembles the site for the MAIN page (the preview renders
@@ -3246,8 +3686,9 @@ export default function App({ appId, token }) {
       viewMode: viewMode || null,
       buildStatus: build.buildStatus || null,
       mainFile: mainPath || null,
+      projectId: activeProjectId,
     })
-  }, [selectedPath, viewMode, build.buildStatus, mainPath])
+  }, [selectedPath, viewMode, build.buildStatus, mainPath, activeProjectId])
 
   return (
     <div className="ws-root">
@@ -3287,6 +3728,14 @@ export default function App({ appId, token }) {
             <span className="ws-brand-fallback" style={{ display: 'none' }} aria-hidden="true" />
           </button>
           <div className="ws-top-title">
+            <button
+              type="button"
+              className="ws-project-btn"
+              onClick={handleProjectMenu}
+              title="Projects"
+            >
+              {activeProject.name}
+            </button>
             {openName
               ? <span className="ws-top-path" title={selectedPath}>{openName}</span>
               : <span className="ws-top-path ws-top-path--muted">No file open</span>}
@@ -3333,6 +3782,26 @@ export default function App({ appId, token }) {
                   : <PlayIcon size={20} />}
               </button>
             </>
+          )}
+          <button
+            className="ws-toolbar-btn"
+            onClick={handlePublish}
+            disabled={publishing}
+            aria-label={publishing ? 'Publishing…' : 'Publish'}
+            title={publishing ? 'Publishing…' : 'Publish'}
+          >
+            <PublishIcon size={20} />
+          </button>
+          {publishedUrl && (
+            <button
+              className="ws-toolbar-btn"
+              onClick={handleUnpublish}
+              disabled={publishing}
+              aria-label="Unpublish"
+              title="Unpublish"
+            >
+              <UnpublishIcon size={20} />
+            </button>
           )}
           <SyncPill online={online} pending={pending} hasRuntime={storage.hasRuntime} />
           {/* Chat toggle is the rightmost control of the bar (moved out of the
@@ -3393,9 +3862,12 @@ export default function App({ appId, token }) {
               <span className="ws-chat-divider-bar" aria-hidden="true" />
             </div>
             <ChatPanel
+              key={activeProjectId}
               appId={appId}
               token={token}
               storage={storage}
+              projectId={activeProjectId}
+              persistKey={`${activePrefix}chat_id.json`}
               onFilesMaybeChanged={onFilesMaybeChanged}
               quickActions={quickActions}
               getContext={getContext}
@@ -3532,6 +4004,24 @@ const CSS = `
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.ws-project-btn {
+  flex: 0 1 auto;
+  max-width: 140px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: 650 12px/1 var(--font);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.ws-project-btn:active { background: var(--surface2, var(--surface)); }
 .ws-top-path {
   font-family: var(--font);
   min-width: 0;
@@ -4209,6 +4699,48 @@ const CSS = `
    additionally gets the shared :focus-visible ring. */
 .ws-modal-input:focus:not(:focus-visible) { outline: none; }
 .ws-modal-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.ws-modal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.ws-modal-option {
+  min-height: 44px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: 600 13px/1.2 var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+.ws-modal-option:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ws-modal-option--danger { color: var(--danger); }
+.ws-publish-url {
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: 12px/1.45 var(--mono);
+  overflow-wrap: anywhere;
+}
+.ws-publish-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ws-publish-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
 .ws-modal-actions {
   display: flex;
   justify-content: flex-end;
