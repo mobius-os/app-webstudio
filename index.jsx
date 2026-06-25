@@ -1361,6 +1361,147 @@ function FileNode({
   )
 }
 
+function ProjectSelector({
+  projects, projectsLoaded, activeProjectId,
+  onSwitchProject, onNewProject, onRenameProject, onDeleteProject,
+  publishedUrl, publishing, buildStatus, onPublish, onUnpublish,
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const active = projects.find((p) => p.id === activeProjectId) || projects[0] || DEFAULT_PROJECT
+  const canDelete = active.id !== DEFAULT_PROJECT.id && projects.length > 1
+  const canPublish = buildStatus === 'done'
+
+  useEffect(() => {
+    if (!open) return undefined
+    const onDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('pointerdown', onDown, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div className="ws-project-picker" ref={ref}>
+      <button
+        type="button"
+        className="ws-project-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Switch project"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="ws-project-trigger-name">{active.name}</span>
+        <ChevronIcon size={13} />
+      </button>
+      {open && (
+        <div className="ws-project-menu" role="menu">
+          <div className="ws-project-list" role="group" aria-label="Projects">
+            {projectsLoaded ? projects.map((project) => (
+              <button
+                key={project.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={project.id === activeProjectId}
+                className={`ws-project-item ${project.id === activeProjectId ? 'ws-project-item--active' : ''}`}
+                onClick={() => {
+                  setOpen(false)
+                  if (project.id !== activeProjectId) onSwitchProject(project.id)
+                }}
+              >
+                <span className="ws-project-item-name">{project.name}</span>
+              </button>
+            )) : (
+              <div className="ws-project-loading">Loading projects...</div>
+            )}
+          </div>
+          <div className="ws-project-actions" role="group" aria-label="Project actions">
+            <button
+              type="button"
+              role="menuitem"
+              className="ws-project-action"
+              onClick={() => { setOpen(false); onNewProject() }}
+              disabled={!projectsLoaded}
+            >
+              New Project
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="ws-project-action"
+              onClick={() => { setOpen(false); onRenameProject(active.id) }}
+              disabled={!projectsLoaded}
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="ws-project-action ws-project-action--danger"
+              disabled={!projectsLoaded || !canDelete}
+              onClick={() => { setOpen(false); onDeleteProject(active.id) }}
+            >
+              Delete
+            </button>
+          </div>
+          <div className="ws-project-publish" role="group" aria-label="Publish">
+            {publishedUrl ? (
+              <>
+                <div className="ws-project-publish-url">{publishedUrl}</div>
+                <div className="ws-project-publish-actions">
+                  <button
+                    type="button"
+                    className="ws-project-action ws-project-action--compact"
+                    onClick={() => navigator.clipboard?.writeText(publishedUrl).catch(() => {})}
+                    title="Copy URL"
+                    aria-label="Copy published URL"
+                  >
+                    <CopyIcon size={15} />
+                    Copy
+                  </button>
+                  <a
+                    className="ws-project-action ws-project-action--compact ws-project-link"
+                    href={publishedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open
+                  </a>
+                </div>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="ws-project-action"
+                  onClick={() => { setOpen(false); onUnpublish() }}
+                  disabled={publishing}
+                >
+                  {publishing ? 'Unpublishing...' : 'Unpublish'}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                role="menuitem"
+                className="ws-project-action"
+                onClick={() => { setOpen(false); onPublish() }}
+                disabled={publishing || !canPublish}
+                title={!canPublish ? 'Build first' : (publishing ? 'Publishing...' : 'Publish')}
+              >
+                {publishing ? 'Publishing...' : 'Publish'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Left slide-in file drawer (VSCode explorer shape): a panel that transforms
 // in from the left edge over a dimming backdrop, opened by the logo toggle.
 // It is ALWAYS mounted (the `--open` class drives the transform).
@@ -1372,7 +1513,8 @@ function FileNavPanel({
   appId, open, onClose, files, selectedPath, onSelect, canMutate,
   onCreateFile, onCreateFolder, onDeleteFile, onDeleteFolder,
   onUpload, onMove, onRename, mainPath, onSetMain, returnFocusRef,
-  projects, projectsLoaded, activeProjectId, onProjectSwitch, onProjectAction,
+  projects, projectsLoaded, activeProjectId,
+  onSwitchProject, onNewProject, onRenameProject, onDeleteProject,
   publishedUrl, publishing, buildStatus, onPublish, onUnpublish,
 }) {
   const root = useMemo(() => buildTree(files), [files])
@@ -1543,8 +1685,6 @@ function FileNavPanel({
       onSelect: () => (ctx.isFolder ? onDeleteFolder(ctx.path) : onDeleteFile(ctx.path)),
     },
   ] : []
-  const canDeleteProject = projects.length > 1
-  const canPublish = buildStatus === 'done'
 
   return (
     <>
@@ -1563,114 +1703,24 @@ function FileNavPanel({
         onTouchEnd={onDrawerTouchEnd}
         onTouchCancel={onDrawerTouchCancel}
       >
-        <section className="ws-drawer-projects" aria-label="Projects">
-          <div className="ws-drawer-section-title">Projects</div>
-          <div className="ws-project-list">
-            {projectsLoaded ? projects.map((project) => {
-              const active = project.id === activeProjectId
-              const deleteDisabled = project.id === 'default' || !canDeleteProject
-              return (
-                <div
-                  key={project.id}
-                  className={`ws-project-row ${active ? 'ws-project-row--active' : ''}`}
-                >
-                  <button
-                    type="button"
-                    className="ws-project-open"
-                    onClick={() => onProjectSwitch(project.id)}
-                    aria-current={active ? 'true' : undefined}
-                    title={project.name}
-                  >
-                    <span className="ws-project-check" aria-hidden="true">
-                      {active ? <CheckIcon /> : null}
-                    </span>
-                    <span className="ws-project-name">{project.name}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="ws-project-icon-btn"
-                    onClick={() => onProjectAction('rename', project.id)}
-                    aria-label={`Rename ${project.name}`}
-                    title="Rename"
-                  >
-                    <PencilIcon />
-                  </button>
-                  <button
-                    type="button"
-                    className="ws-project-icon-btn"
-                    onClick={() => onProjectAction('delete', project.id)}
-                    disabled={deleteDisabled}
-                    aria-label={`Delete ${project.name}`}
-                    title={deleteDisabled ? 'Cannot delete default or last project' : 'Delete'}
-                  >
-                    <TrashIcon />
-                  </button>
-                </div>
-              )
-            }) : (
-              <div className="ws-project-loading">Loading projects…</div>
-            )}
-            <button
-              type="button"
-              className="ws-project-new"
-              onClick={() => onProjectAction('new')}
-              disabled={!projectsLoaded}
-            >
-              + New project
-            </button>
-          </div>
-          <div className="ws-publish-panel">
-            <div className="ws-drawer-section-title">Publish</div>
-            {publishedUrl ? (
-              <>
-                <div className="ws-publish-url ws-publish-url--drawer">{publishedUrl}</div>
-                <div className="ws-publish-actions">
-                  <button
-                    type="button"
-                    className="ws-project-action-btn"
-                    onClick={() => navigator.clipboard?.writeText(publishedUrl).catch(() => {})}
-                    title="Copy URL"
-                    aria-label="Copy published URL"
-                  >
-                    <CopyIcon />
-                    Copy
-                  </button>
-                  <a
-                    className="ws-project-action-btn ws-project-action-link"
-                    href={publishedUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Open
-                  </a>
-                  <button
-                    type="button"
-                    className="ws-project-action-btn"
-                    onClick={onUnpublish}
-                    disabled={publishing}
-                  >
-                    Unpublish
-                  </button>
-                </div>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="ws-project-action-btn ws-project-action-btn--wide"
-                onClick={onPublish}
-                disabled={publishing || !canPublish}
-                title={!canPublish ? 'Build first' : (publishing ? 'Publishing…' : 'Publish')}
-              >
-                <PublishIcon size={16} />
-                {publishing ? 'Publishing…' : 'Publish'}
-              </button>
-            )}
-          </div>
-        </section>
         <div className="ws-drawer-head">
-          <div>
+          <div className="ws-drawer-head-text">
             <span className="ws-drawer-title">Files</span>
           </div>
+          <ProjectSelector
+            projects={projects}
+            projectsLoaded={projectsLoaded}
+            activeProjectId={activeProjectId}
+            onSwitchProject={onSwitchProject}
+            onNewProject={onNewProject}
+            onRenameProject={onRenameProject}
+            onDeleteProject={onDeleteProject}
+            publishedUrl={publishedUrl}
+            publishing={publishing}
+            buildStatus={buildStatus}
+            onPublish={onPublish}
+            onUnpublish={onUnpublish}
+          />
         </div>
         <div className="ws-drawer-actions">
           <button className="ws-drawer-btn" onClick={onCreateFile} disabled={!canMutate}>New file</button>
@@ -2087,7 +2137,7 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
-const APP_VERSION = '0.9.0'
+const APP_VERSION = '0.9.1'
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
@@ -2195,6 +2245,11 @@ function writeFileCache(appId, projectId, index, contents, lastPath) {
   } catch {
     // Quota / disabled / serialization — leave the previous snapshot in place.
   }
+}
+
+function removeFileCache(appId, projectId) {
+  if (typeof localStorage === 'undefined') return
+  try { localStorage.removeItem(fileCacheKey(appId, projectId)) } catch {}
 }
 
 function normalizeProjects(raw) {
@@ -2635,6 +2690,7 @@ export default function App({ appId, token }) {
   const mainResolvedRef = useRef(false)
   const build = useBuild({ appId, token, storage, rootStorage, prefix: activePrefix, online })
   const seenBuildStatusRef = useRef('')
+  const hydratedProjectRef = useRef(activeProjectId)
   const activeProject = projects.find((p) => p.id === activeProjectId)
     || { id: activeProjectId, name: activeProjectId === 'default' ? 'Project 1' : activeProjectId }
   const readFreshProjects = useCallback(async () => {
@@ -2691,7 +2747,9 @@ export default function App({ appId, token }) {
   }, [appId, activeProjectId, rootStorage])
 
   useEffect(() => {
-    const snapshot = readFileCache(appId, activeProjectId)
+    const switchingProject = hydratedProjectRef.current !== activeProjectId
+    hydratedProjectRef.current = activeProjectId
+    const snapshot = switchingProject ? null : readFileCache(appId, activeProjectId)
     const nextFiles = snapshot?.index || []
     filesRef.current = nextFiles
     selectedPathRef.current = snapshot?.lastPath || null
@@ -3538,14 +3596,42 @@ export default function App({ appId, token }) {
     }
   }, [selectedPath, selectedIsBinary, fileSaving, storage, fileContent, refreshPending])
 
+  const resetFileUi = useCallback(() => {
+    filesRef.current = []
+    selectedPathRef.current = null
+    mainResolvedRef.current = false
+    seenBuildStatusRef.current = ''
+    mainPathRef.current = null
+    fileContentRef.current = ''
+    fileDirtyRef.current = false
+    fileSavingRef.current = false
+    setFiles([])
+    setFileCache({})
+    setIndexLoaded(false)
+    setSelectedPath(null)
+    setFileContent('')
+    setFileLoading(false)
+    setFileError(null)
+    setFileDirty(false)
+    setFileSaving(false)
+    setMainPath(null)
+    setMainReady(false)
+    setViewMode('source')
+    setPublishedUrl(null)
+    try { navHandleRef.current?.close?.() } catch {}
+    navHandleRef.current = null
+    setNavOpen(false)
+  }, [])
+
   const switchProject = useCallback(async (id) => {
     if (!isSafeProjectId(id) || id === activeProjectId) return
     if (fileDirty && !fileSaving && canEditSelected) {
       await handleSaveFile()
     }
+    resetFileUi()
     writeActiveProject(appId, id)
     setActiveProjectId(id)
-  }, [activeProjectId, appId, canEditSelected, fileDirty, fileSaving, handleSaveFile])
+  }, [activeProjectId, appId, canEditSelected, fileDirty, fileSaving, handleSaveFile, resetFileUi])
 
   const handleProjectMenu = useCallback(async (requestedAction = null, requestedProjectId = null) => {
     if (!projectsLoaded) {
@@ -3649,9 +3735,12 @@ export default function App({ appId, token }) {
         await deleteStorageTree(rootStorage, projectPrefix(targetId))
         await rootStorage.setJSON('projects.json', next)
         setProjects(next)
+        removeFileCache(appId, targetId)
         if (targetId === activeProjectId) {
+          resetFileUi()
           writeActiveProject(appId, fallback)
           setActiveProjectId(fallback)
+          removeFileCache(appId, targetId)
         }
       } catch (e) {
         await modal.alert(e.message || String(e), { title: 'Could not delete project' })
@@ -3665,6 +3754,7 @@ export default function App({ appId, token }) {
     projects,
     projectsLoaded,
     readFreshProjects,
+    resetFileUi,
     rootStorage,
     switchProject,
     token,
@@ -4008,8 +4098,10 @@ export default function App({ appId, token }) {
           projects={projects}
           projectsLoaded={projectsLoaded}
           activeProjectId={activeProjectId}
-          onProjectSwitch={switchProject}
-          onProjectAction={handleProjectMenu}
+          onSwitchProject={switchProject}
+          onNewProject={() => handleProjectMenu('new')}
+          onRenameProject={(projectId) => handleProjectMenu('rename', projectId)}
+          onDeleteProject={(projectId) => handleProjectMenu('delete', projectId)}
           publishedUrl={publishedUrl}
           publishing={publishing}
           buildStatus={build.buildStatus}
@@ -4482,146 +4574,6 @@ const CSS = `
 /* While the finger drags, kill the transform-transition so the panel tracks
    the finger 1:1; removing the class lets the snap/close animate normally. */
 .ws-file-drawer--dragging { transition: none; }
-.ws-drawer-projects {
-  flex: 0 0 auto;
-  padding: 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-.ws-drawer-section-title {
-  padding: 2px 4px 8px;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 700;
-}
-.ws-project-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.ws-project-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  min-height: 44px;
-  border-radius: 8px;
-  background: var(--surface);
-}
-.ws-project-row--active {
-  background: var(--accent-dim);
-}
-.ws-project-open {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border: none;
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font: 600 13px/1.2 var(--font);
-  text-align: left;
-  cursor: pointer;
-}
-.ws-project-row--active .ws-project-open {
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-.ws-project-check {
-  flex: 0 0 18px;
-  width: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.ws-project-name {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.ws-project-icon-btn {
-  flex: 0 0 auto;
-  width: 36px;
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-}
-.ws-project-icon-btn:active,
-.ws-project-open:active,
-.ws-project-new:active,
-.ws-project-action-btn:active {
-  background: var(--surface2);
-}
-.ws-project-icon-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-.ws-project-new {
-  width: 100%;
-  min-height: 44px;
-  padding: 8px;
-  border: none;
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font: 650 13px/1.2 var(--font);
-  text-align: left;
-  cursor: pointer;
-}
-.ws-project-new:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.ws-project-loading {
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  padding: 8px;
-  color: var(--text);
-  opacity: 0.65;
-  font-size: 13px;
-}
-.ws-publish-panel {
-  padding-top: 10px;
-}
-.ws-publish-url--drawer {
-  margin-bottom: 8px;
-}
-.ws-publish-panel .ws-publish-actions {
-  flex-wrap: wrap;
-}
-.ws-project-action-btn {
-  min-height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface2);
-  color: var(--text);
-  font: 650 12px/1.2 var(--font);
-  text-decoration: none;
-  cursor: pointer;
-}
-.ws-project-action-btn--wide {
-  width: 100%;
-}
-.ws-project-action-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
 .ws-drawer-head {
   display: flex;
   align-items: center;
@@ -4631,7 +4583,139 @@ const CSS = `
   border-bottom: 1px solid var(--border);
   user-select: none;
 }
-.ws-drawer-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.ws-drawer-head-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ws-drawer-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+.ws-project-picker {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.ws-project-trigger {
+  max-width: 170px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: 650 12px/1.2 var(--font);
+  cursor: pointer;
+}
+.ws-project-trigger svg {
+  flex: 0 0 auto;
+  transform: rotate(90deg);
+  color: var(--muted);
+}
+.ws-project-trigger-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ws-project-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 65;
+  width: min(230px, 78vw);
+  max-height: min(420px, 70vh);
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--border-light, var(--border));
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: 0 8px 28px var(--ws-scrim-soft);
+}
+.ws-project-list,
+.ws-project-actions,
+.ws-project-publish {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-project-actions,
+.ws-project-publish {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border);
+}
+.ws-project-item,
+.ws-project-action {
+  width: 100%;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  font: 550 13px/1.2 var(--font);
+  cursor: pointer;
+}
+.ws-project-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+.ws-project-action--compact {
+  justify-content: center;
+  width: auto;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.ws-project-item-name {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ws-project-item--active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.ws-project-action--danger { color: var(--danger); }
+.ws-project-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ws-project-item:active,
+.ws-project-action:active:not(:disabled) {
+  background: var(--surface2, var(--surface));
+}
+.ws-project-loading {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 7px 9px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.ws-project-publish-url {
+  padding: 7px 9px;
+  color: var(--muted);
+  font: 12px/1.45 var(--mono);
+  overflow-wrap: anywhere;
+}
+.ws-project-publish-actions {
+  display: flex;
+  gap: 4px;
+}
+.ws-project-link {
+  justify-content: center;
+}
 .ws-drawer-actions {
   display: flex;
   gap: 6px;
