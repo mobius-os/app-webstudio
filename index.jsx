@@ -1048,6 +1048,47 @@ function UnpublishIcon({ size = 20 }) {
     </svg>
   )
 }
+function CheckIcon({ size = 16 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="m20 6-11 11-5-5" />
+    </svg>
+  )
+}
+function PencilIcon({ size = 16 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  )
+}
+function TrashIcon({ size = 16 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  )
+}
+function CopyIcon({ size = 16 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  )
+}
 
 // In-app context menu. Native context menus / window.prompt are unavailable
 // in the mini-app sandbox (no allow-modals), and a native right-click menu
@@ -1331,6 +1372,8 @@ function FileNavPanel({
   appId, open, onClose, files, selectedPath, onSelect, canMutate,
   onCreateFile, onCreateFolder, onDeleteFile, onDeleteFolder,
   onUpload, onMove, onRename, mainPath, onSetMain, returnFocusRef,
+  projects, projectsLoaded, activeProjectId, onProjectSwitch, onProjectAction,
+  publishedUrl, publishing, buildStatus, onPublish, onUnpublish,
 }) {
   const root = useMemo(() => buildTree(files), [files])
   const treeRef = useRef(null)
@@ -1500,6 +1543,8 @@ function FileNavPanel({
       onSelect: () => (ctx.isFolder ? onDeleteFolder(ctx.path) : onDeleteFile(ctx.path)),
     },
   ] : []
+  const canDeleteProject = projects.length > 1
+  const canPublish = buildStatus === 'done'
 
   return (
     <>
@@ -1518,6 +1563,110 @@ function FileNavPanel({
         onTouchEnd={onDrawerTouchEnd}
         onTouchCancel={onDrawerTouchCancel}
       >
+        <section className="ws-drawer-projects" aria-label="Projects">
+          <div className="ws-drawer-section-title">Projects</div>
+          <div className="ws-project-list">
+            {projectsLoaded ? projects.map((project) => {
+              const active = project.id === activeProjectId
+              const deleteDisabled = project.id === 'default' || !canDeleteProject
+              return (
+                <div
+                  key={project.id}
+                  className={`ws-project-row ${active ? 'ws-project-row--active' : ''}`}
+                >
+                  <button
+                    type="button"
+                    className="ws-project-open"
+                    onClick={() => onProjectSwitch(project.id)}
+                    aria-current={active ? 'true' : undefined}
+                    title={project.name}
+                  >
+                    <span className="ws-project-check" aria-hidden="true">
+                      {active ? <CheckIcon /> : null}
+                    </span>
+                    <span className="ws-project-name">{project.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="ws-project-icon-btn"
+                    onClick={() => onProjectAction('rename', project.id)}
+                    aria-label={`Rename ${project.name}`}
+                    title="Rename"
+                  >
+                    <PencilIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className="ws-project-icon-btn"
+                    onClick={() => onProjectAction('delete', project.id)}
+                    disabled={deleteDisabled}
+                    aria-label={`Delete ${project.name}`}
+                    title={deleteDisabled ? 'Cannot delete default or last project' : 'Delete'}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
+              )
+            }) : (
+              <div className="ws-project-loading">Loading projects…</div>
+            )}
+            <button
+              type="button"
+              className="ws-project-new"
+              onClick={() => onProjectAction('new')}
+              disabled={!projectsLoaded}
+            >
+              + New project
+            </button>
+          </div>
+          <div className="ws-publish-panel">
+            <div className="ws-drawer-section-title">Publish</div>
+            {publishedUrl ? (
+              <>
+                <div className="ws-publish-url ws-publish-url--drawer">{publishedUrl}</div>
+                <div className="ws-publish-actions">
+                  <button
+                    type="button"
+                    className="ws-project-action-btn"
+                    onClick={() => navigator.clipboard?.writeText(publishedUrl).catch(() => {})}
+                    title="Copy URL"
+                    aria-label="Copy published URL"
+                  >
+                    <CopyIcon />
+                    Copy
+                  </button>
+                  <a
+                    className="ws-project-action-btn ws-project-action-link"
+                    href={publishedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open
+                  </a>
+                  <button
+                    type="button"
+                    className="ws-project-action-btn"
+                    onClick={onUnpublish}
+                    disabled={publishing}
+                  >
+                    Unpublish
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="ws-project-action-btn ws-project-action-btn--wide"
+                onClick={onPublish}
+                disabled={publishing || !canPublish}
+                title={!canPublish ? 'Build first' : (publishing ? 'Publishing…' : 'Publish')}
+              >
+                <PublishIcon size={16} />
+                {publishing ? 'Publishing…' : 'Publish'}
+              </button>
+            )}
+          </div>
+        </section>
         <div className="ws-drawer-head">
           <div>
             <span className="ws-drawer-title">Files</span>
@@ -1938,6 +2087,7 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
+const APP_VERSION = '0.9.0'
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
@@ -2083,6 +2233,7 @@ function projectSlug(name, existingIds) {
 }
 
 async function deleteStorageTree(storage, prefix) {
+  if (!prefix) throw new Error('deleteStorageTree: refusing empty prefix (would wipe app root)')
   const entries = await storage.list(prefix)
   for (const entry of entries) {
     if (entry.type === 'directory') await deleteStorageTree(storage, entry.path)
@@ -2486,6 +2637,18 @@ export default function App({ appId, token }) {
   const seenBuildStatusRef = useRef('')
   const activeProject = projects.find((p) => p.id === activeProjectId)
     || { id: activeProjectId, name: activeProjectId === 'default' ? 'Project 1' : activeProjectId }
+  const readFreshProjects = useCallback(async () => {
+    try {
+      const stored = await rootStorage.getFresh('projects.json')
+      const fresh = normalizeProjects(stored)
+      if (fresh && fresh.length > 0) return fresh
+    } catch {
+      // Fall through to the in-memory list, then the seeded default.
+    }
+    const fallback = normalizeProjects(projects)
+    if (fallback && fallback.length > 0) return fallback
+    return [{ id: DEFAULT_PROJECT.id, name: DEFAULT_PROJECT.name, createdAt: Date.now() }]
+  }, [projects, rootStorage])
 
   useEffect(() => {
     if (typeof localStorage === 'undefined') return
@@ -3384,12 +3547,12 @@ export default function App({ appId, token }) {
     setActiveProjectId(id)
   }, [activeProjectId, appId, canEditSelected, fileDirty, fileSaving, handleSaveFile])
 
-  const handleProjectMenu = useCallback(async () => {
+  const handleProjectMenu = useCallback(async (requestedAction = null, requestedProjectId = null) => {
     if (!projectsLoaded) {
       await modal.alert('Projects are still loading.', { title: 'Projects' })
       return
     }
-    const action = await modal.choose(`Active project: ${activeProject.name}`, {
+    const action = requestedAction || await modal.choose(`Active project: ${activeProject.name}`, {
       title: 'Projects',
       actions: [
         { label: 'New Project', value: 'new' },
@@ -3418,9 +3581,10 @@ export default function App({ appId, token }) {
       })
       const clean = String(name || '').trim()
       if (!clean) return
-      const id = projectSlug(clean, new Set(projects.map((p) => p.id)))
-      const next = [...projects, { id, name: clean, createdAt: Date.now() }]
       try {
+        const fresh = await readFreshProjects()
+        const id = projectSlug(clean, new Set(fresh.map((p) => p.id)))
+        const next = [...fresh, { id, name: clean, createdAt: Date.now() }]
         await rootStorage.setJSON('projects.json', next)
         setProjects(next)
         await switchProject(id)
@@ -3430,14 +3594,23 @@ export default function App({ appId, token }) {
       return
     }
     if (action === 'rename') {
+      const targetId = requestedProjectId || activeProjectId
+      const target = projects.find((p) => p.id === targetId)
+        || { id: targetId, name: targetId === 'default' ? 'Project 1' : targetId }
       const name = await modal.prompt('Project name', {
         title: 'Rename Project',
-        defaultValue: activeProject.name,
+        defaultValue: target.name,
       })
       const clean = String(name || '').trim()
-      if (!clean || clean === activeProject.name) return
-      const next = projects.map((p) => (p.id === activeProjectId ? { ...p, name: clean } : p))
+      if (!clean || clean === target.name) return
       try {
+        const fresh = await readFreshProjects()
+        const current = fresh.find((p) => p.id === targetId)
+        if (!current) {
+          await modal.alert('That project no longer exists.', { title: 'Could not rename project' })
+          return
+        }
+        const next = fresh.map((p) => (p.id === targetId ? { ...p, name: clean } : p))
         await rootStorage.setJSON('projects.json', next)
         setProjects(next)
       } catch (e) {
@@ -3446,23 +3619,40 @@ export default function App({ appId, token }) {
       return
     }
     if (action === 'delete') {
-      if (activeProjectId === 'default' || projects.length <= 1) {
-        await modal.alert('The default project and the last remaining project cannot be deleted.', { title: 'Cannot delete project' })
-        return
-      }
-      const ok = await modal.confirm(
-        `Delete “${activeProject.name}” and all of its files, builds, and chat history? This cannot be undone.`,
-        { title: 'Delete Project', danger: true },
-      )
-      if (!ok) return
-      const fallback = projects.find((p) => p.id !== activeProjectId)?.id || 'default'
-      const next = projects.filter((p) => p.id !== activeProjectId)
+      const targetId = requestedProjectId || activeProjectId
       try {
-        await deleteStorageTree(rootStorage, projectPrefix(activeProjectId))
+        const fresh = await readFreshProjects()
+        const target = fresh.find((p) => p.id === targetId)
+        if (!target) {
+          await modal.alert('That project no longer exists.', { title: 'Cannot delete project' })
+          return
+        }
+        if (targetId === 'default' || fresh.length <= 1) {
+          await modal.alert('The default project and the last remaining project cannot be deleted.', { title: 'Cannot delete project' })
+          return
+        }
+        const ok = await modal.confirm(
+          `Delete “${target.name}” and all of its files, builds, and chat history? This cannot be undone.`,
+          { title: 'Delete Project', danger: true },
+        )
+        if (!ok) return
+        const fallback = fresh.find((p) => p.id !== targetId)?.id || 'default'
+        const next = fresh.filter((p) => p.id !== targetId)
+        try {
+          await fetch(`/api/apps/${appId}/publish?project_id=${encodeURIComponent(targetId)}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          })
+        } catch {
+          // Best-effort cleanup only.
+        }
+        await deleteStorageTree(rootStorage, projectPrefix(targetId))
         await rootStorage.setJSON('projects.json', next)
         setProjects(next)
-        writeActiveProject(appId, fallback)
-        setActiveProjectId(fallback)
+        if (targetId === activeProjectId) {
+          writeActiveProject(appId, fallback)
+          setActiveProjectId(fallback)
+        }
       } catch (e) {
         await modal.alert(e.message || String(e), { title: 'Could not delete project' })
       }
@@ -3474,8 +3664,10 @@ export default function App({ appId, token }) {
     modal,
     projects,
     projectsLoaded,
+    readFreshProjects,
     rootStorage,
     switchProject,
+    token,
   ])
 
   const showPublishedModal = useCallback(async (fullUrl) => {
@@ -3693,9 +3885,8 @@ export default function App({ appId, token }) {
   return (
     <div className="ws-root">
       <style>{CSS}</style>
-      {/* Two-zone top bar: left = drawer toggle + open filename, right =
-          [Source/Preview toggle] [Build] (sync pill) and the chat toggle as
-          the rightmost control. The grid is 1fr | auto so the left zone
+      {/* Two-zone top bar: left = drawer toggle + project/open filename,
+          right = Build + [Source/Preview toggle]. The grid is 1fr | auto so the left zone
           flexes/truncates and the right zone sizes to its controls.
           Identical structure in app-latex (unprefixed classes). */}
       <header className="ws-top-bar">
@@ -3728,14 +3919,7 @@ export default function App({ appId, token }) {
             <span className="ws-brand-fallback" style={{ display: 'none' }} aria-hidden="true" />
           </button>
           <div className="ws-top-title">
-            <button
-              type="button"
-              className="ws-project-btn"
-              onClick={handleProjectMenu}
-              title="Projects"
-            >
-              {activeProject.name}
-            </button>
+            <span className="ws-project-label" title={activeProject.name}>{activeProject.name}</span>
             {openName
               ? <span className="ws-top-path" title={selectedPath}>{openName}</span>
               : <span className="ws-top-path ws-top-path--muted">No file open</span>}
@@ -3744,6 +3928,19 @@ export default function App({ appId, token }) {
         <div className="ws-top-zone ws-top-zone--right">
           {showHtmlControls && (
             <>
+              <button
+                className="ws-toolbar-btn ws-toolbar-btn--primary"
+                onClick={handleBuild}
+                disabled={build.buildStatus === 'building'}
+                aria-label={build.buildStatus === 'building' ? 'Building…' : 'Build'}
+                title={build.buildStatus === 'building'
+                  ? 'Building…'
+                  : `Build ${mainPath.replace(/^files\//, '')}`}
+              >
+                {build.buildStatus === 'building'
+                  ? <BuildingIndicator size={20} />
+                  : <PlayIcon size={20} />}
+              </button>
               {/* Icon-only [Source | Preview] toggle. role=group + aria-pressed exposes
                   the active segment to assistive tech; title + aria-label name the action. */}
               <div className="ws-seg-toggle" role="group" aria-label="View">
@@ -3768,45 +3965,10 @@ export default function App({ appId, token }) {
                   <EyeIcon size={20} />
                 </button>
               </div>
-              <button
-                className="ws-toolbar-btn ws-toolbar-btn--primary"
-                onClick={handleBuild}
-                disabled={build.buildStatus === 'building'}
-                aria-label={build.buildStatus === 'building' ? 'Building…' : 'Build'}
-                title={build.buildStatus === 'building'
-                  ? 'Building…'
-                  : `Build ${mainPath.replace(/^files\//, '')}`}
-              >
-                {build.buildStatus === 'building'
-                  ? <BuildingIndicator size={20} />
-                  : <PlayIcon size={20} />}
-              </button>
             </>
           )}
-          <button
-            className="ws-toolbar-btn"
-            onClick={handlePublish}
-            disabled={publishing}
-            aria-label={publishing ? 'Publishing…' : 'Publish'}
-            title={publishing ? 'Publishing…' : 'Publish'}
-          >
-            <PublishIcon size={20} />
-          </button>
-          {publishedUrl && (
-            <button
-              className="ws-toolbar-btn"
-              onClick={handleUnpublish}
-              disabled={publishing}
-              aria-label="Unpublish"
-              title="Unpublish"
-            >
-              <UnpublishIcon size={20} />
-            </button>
-          )}
-          <SyncPill online={online} pending={pending} hasRuntime={storage.hasRuntime} />
-          {/* Chat toggle is the rightmost control of the bar (moved out of the
-              old centre zone) so the action cluster reads left→right:
-              [view][Build][sync][chat]. */}
+          {/* Chat toggle — the embedded agent chat is core, always available
+              (not project-specific, so it stays in the bar, not the drawer). */}
           <button
             type="button"
             className="ws-toolbar-btn ws-chat-toggle-btn"
@@ -3843,6 +4005,16 @@ export default function App({ appId, token }) {
           mainPath={mainPath}
           onSetMain={handleSetMain}
           returnFocusRef={navToggleRef}
+          projects={projects}
+          projectsLoaded={projectsLoaded}
+          activeProjectId={activeProjectId}
+          onProjectSwitch={switchProject}
+          onProjectAction={handleProjectMenu}
+          publishedUrl={publishedUrl}
+          publishing={publishing}
+          buildStatus={build.buildStatus}
+          onPublish={handlePublish}
+          onUnpublish={handleUnpublish}
         />
         {chatOpen ? (
           <>
@@ -3922,8 +4094,10 @@ const CSS = `
 /* mobius-ui:Toolbar v1 — keep in sync with app-latex (unprefixed) */
 /* Two-zone bar: minmax(0,1fr) | auto lets the left zone (drawer toggle +
    filename) flex + truncate while the right zone sizes to its action cluster
-   ([view toggle][Build][sync][chat]). */
+   ([Build][view toggle]). */
 .ws-top-bar {
+  position: relative;
+  z-index: 11;
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -4014,24 +4188,15 @@ const CSS = `
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.ws-project-btn {
+.ws-project-label {
   flex: 0 1 auto;
   max-width: 140px;
-  min-height: 32px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg);
   color: var(--text);
-  font: 650 12px/1 var(--font);
+  font: 650 12px/1.2 var(--font);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
 }
-.ws-project-btn:active { background: var(--surface2, var(--surface)); }
 .ws-top-path {
   font-family: var(--font);
   min-width: 0;
@@ -4317,6 +4482,146 @@ const CSS = `
 /* While the finger drags, kill the transform-transition so the panel tracks
    the finger 1:1; removing the class lets the snap/close animate normally. */
 .ws-file-drawer--dragging { transition: none; }
+.ws-drawer-projects {
+  flex: 0 0 auto;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.ws-drawer-section-title {
+  padding: 2px 4px 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+.ws-project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ws-project-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 44px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.ws-project-row--active {
+  background: var(--accent-dim);
+}
+.ws-project-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: none;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: 600 13px/1.2 var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+.ws-project-row--active .ws-project-open {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.ws-project-check {
+  flex: 0 0 18px;
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ws-project-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ws-project-icon-btn {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.ws-project-icon-btn:active,
+.ws-project-open:active,
+.ws-project-new:active,
+.ws-project-action-btn:active {
+  background: var(--surface2);
+}
+.ws-project-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.ws-project-new {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px;
+  border: none;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: 650 13px/1.2 var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+.ws-project-new:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ws-project-loading {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  color: var(--text);
+  opacity: 0.65;
+  font-size: 13px;
+}
+.ws-publish-panel {
+  padding-top: 10px;
+}
+.ws-publish-url--drawer {
+  margin-bottom: 8px;
+}
+.ws-publish-panel .ws-publish-actions {
+  flex-wrap: wrap;
+}
+.ws-project-action-btn {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font: 650 12px/1.2 var(--font);
+  text-decoration: none;
+  cursor: pointer;
+}
+.ws-project-action-btn--wide {
+  width: 100%;
+}
+.ws-project-action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .ws-drawer-head {
   display: flex;
   align-items: center;
