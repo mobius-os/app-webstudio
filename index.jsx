@@ -3974,6 +3974,16 @@ const CSS = `
    ring so a tabbing user sees where they are. */
 .ws-nav-toggle:focus:not(:focus-visible) { outline: none; }
 .ws-nav-toggle:active { opacity: 0.7; }
+/* Drawer-toggle box-highlight (feature 142): neutral wash on hover/focus,
+   accent wash while the file drawer is open, on the rounded 8px button. */
+@media (hover: hover) {
+  .ws-nav-toggle:hover { background: var(--surface2, var(--bg-alt, var(--surface))); }
+}
+.ws-nav-toggle:focus-visible { background: var(--surface2, var(--bg-alt, var(--surface))); }
+.ws-nav-toggle[aria-expanded="true"] {
+  color: var(--accent);
+  background: var(--accent-dim, color-mix(in srgb, var(--accent) 12%, transparent));
+}
 /* The real app icon as the brand mark inside the drawer toggle. */
 .ws-brand-icon {
   width: 44px;
