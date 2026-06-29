@@ -1283,6 +1283,7 @@ function FileNode({
             onContextMenu={onContextMenu}
             onMoveInto={onMoveInto}
             mainPath={mainPath}
+            openMenuPath={openMenuPath}
             parentPath=""
           />
         ))}
@@ -1352,6 +1353,7 @@ function FileNode({
               onContextMenu={onContextMenu}
               onMoveInto={onMoveInto}
               mainPath={mainPath}
+              openMenuPath={openMenuPath}
               parentPath={node.path}
             />
           ))}
@@ -1364,13 +1366,11 @@ function FileNode({
 function ProjectSelector({
   projects, projectsLoaded, activeProjectId,
   onSwitchProject, onNewProject, onRenameProject, onDeleteProject,
-  publishedUrl, publishing, buildStatus, onPublish, onUnpublish,
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const active = projects.find((p) => p.id === activeProjectId) || projects[0] || DEFAULT_PROJECT
   const canDelete = active.id !== DEFAULT_PROJECT.id && projects.length > 1
-  const canPublish = buildStatus === 'done'
 
   useEffect(() => {
     if (!open) return undefined
@@ -1449,54 +1449,62 @@ function ProjectSelector({
               Delete
             </button>
           </div>
-          <div className="ws-project-publish" role="group" aria-label="Publish">
-            {publishedUrl ? (
-              <>
-                <div className="ws-project-publish-url">{publishedUrl}</div>
-                <div className="ws-project-publish-actions">
-                  <button
-                    type="button"
-                    className="ws-project-action ws-project-action--compact"
-                    onClick={() => navigator.clipboard?.writeText(publishedUrl).catch(() => {})}
-                    title="Copy URL"
-                    aria-label="Copy published URL"
-                  >
-                    <CopyIcon size={15} />
-                    Copy
-                  </button>
-                  <a
-                    className="ws-project-action ws-project-action--compact ws-project-link"
-                    href={publishedUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Open
-                  </a>
-                </div>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="ws-project-action"
-                  onClick={() => { setOpen(false); onUnpublish() }}
-                  disabled={publishing}
-                >
-                  {publishing ? 'Unpublishing...' : 'Unpublish'}
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                role="menuitem"
-                className="ws-project-action"
-                onClick={() => { setOpen(false); onPublish() }}
-                disabled={publishing || !canPublish}
-                title={!canPublish ? 'Build first' : (publishing ? 'Publishing...' : 'Publish')}
-              >
-                {publishing ? 'Publishing...' : 'Publish'}
-              </button>
-            )}
-          </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+function PublishDrawerAction({
+  publishedUrl, publishing, buildStatus, onPublish, onUnpublish,
+}) {
+  const canPublish = buildStatus === 'done'
+  return (
+    <div className="ws-drawer-publish" aria-label="Publish">
+      {publishedUrl ? (
+        <>
+          <div className="ws-drawer-publish-url">{publishedUrl}</div>
+          <div className="ws-drawer-publish-actions">
+            <button
+              type="button"
+              className="ws-drawer-publish-btn"
+              onClick={() => navigator.clipboard?.writeText(publishedUrl).catch(() => {})}
+              title="Copy URL"
+              aria-label="Copy published URL"
+            >
+              <CopyIcon size={16} />
+              Copy
+            </button>
+            <a
+              className="ws-drawer-publish-btn ws-drawer-publish-link"
+              href={publishedUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open
+            </a>
+          </div>
+          <button
+            type="button"
+            className="ws-drawer-publish-btn ws-drawer-publish-btn--wide"
+            onClick={onUnpublish}
+            disabled={publishing}
+          >
+            <UnpublishIcon size={18} />
+            {publishing ? 'Unpublishing...' : 'Unpublish'}
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          className="ws-drawer-publish-btn ws-drawer-publish-btn--wide"
+          onClick={onPublish}
+          disabled={publishing || !canPublish}
+          title={!canPublish ? 'Build first' : (publishing ? 'Publishing...' : 'Publish site')}
+        >
+          <PublishIcon size={18} />
+          {publishing ? 'Publishing...' : 'Publish site'}
+        </button>
       )}
     </div>
   )
@@ -1715,11 +1723,6 @@ function FileNavPanel({
             onNewProject={onNewProject}
             onRenameProject={onRenameProject}
             onDeleteProject={onDeleteProject}
-            publishedUrl={publishedUrl}
-            publishing={publishing}
-            buildStatus={buildStatus}
-            onPublish={onPublish}
-            onUnpublish={onUnpublish}
           />
         </div>
         <div className="ws-drawer-actions">
@@ -1761,6 +1764,13 @@ function FileNavPanel({
             }}
           />
         </div>
+        <PublishDrawerAction
+          publishedUrl={publishedUrl}
+          publishing={publishing}
+          buildStatus={buildStatus}
+          onPublish={onPublish}
+          onUnpublish={onUnpublish}
+        />
         {!canMutate && (
           <div className="ws-drawer-syncing" role="status">
             Loading your files… add, upload, and delete unlock once they sync.
@@ -1778,8 +1788,7 @@ function FileNavPanel({
           {files.length === 0 ? (
             canMutate ? (
               <div className="ws-drawer-empty">
-                No files yet. Tap “New file” or Upload to make one. Use a file’s
-                ⋯ menu to set it as the main page or delete it.
+                Upload a file, or open the project chat to tell the agent what to build.
               </div>
             ) : null
           ) : (
@@ -1791,6 +1800,7 @@ function FileNavPanel({
               onContextMenu={setCtx}
               onMoveInto={onMove}
               mainPath={mainPath}
+              openMenuPath={ctx ? ctx.path : null}
             />
           )}
         </div>
@@ -2137,7 +2147,7 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
-const APP_VERSION = '0.9.1'
+const APP_VERSION = '0.9.3'
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
@@ -2471,13 +2481,20 @@ function useBuild({ appId, token, storage, rootStorage, prefix, online }) {
   const pollRef = useRef(null)
   const deadlineRef = useRef(0)
   const buildSeqRef = useRef(0)
+  const buildGenerationRef = useRef(0)
   const buildingRef = useRef(false)
 
   const clearPoll = useCallback(() => {
+    buildGenerationRef.current += 1
     if (pollRef.current) {
       clearTimeout(pollRef.current)
       pollRef.current = null
     }
+    deadlineRef.current = 0
+    // An orphaned in-flight build's poll will never reach finishDone/Error
+    // (its generation is now stale), so its buildingRef would stay stuck true
+    // and block all future builds. Release it here.
+    buildingRef.current = false
   }, [])
 
   useEffect(() => clearPoll, [clearPoll])
@@ -2515,7 +2532,8 @@ function useBuild({ appId, token, storage, rootStorage, prefix, online }) {
 
   // One poll tick: read build/status.json. 404/null → still building (or the
   // cap elapsed → error). A verdict object → done/error.
-  const poll = useCallback(async (doc, onDone) => {
+  const poll = useCallback(async (doc, onDone, generation) => {
+    if (generation !== buildGenerationRef.current) return
     if (Date.now() > deadlineRef.current) {
       finishError('Build timed out (over 2 minutes). Try again, or check the '
         + 'files are valid.')
@@ -2527,13 +2545,14 @@ function useBuild({ appId, token, storage, rootStorage, prefix, online }) {
     } catch (e) {
       status = null
     }
+    if (generation !== buildGenerationRef.current) return
     if (status && typeof status === 'object' && status.status) {
       // The verdict echoes the target it was built FROM. build/target.txt +
       // build/status.json are one shared pair per app, so a build kicked from
       // another tab/device for a DIFFERENT doc can land its verdict here. If
       // it isn't the doc we're waiting on, ignore it and keep polling.
       if (status.target && status.target !== doc) {
-        pollRef.current = setTimeout(() => poll(doc, onDone), BUILD_POLL_MS)
+        pollRef.current = setTimeout(() => poll(doc, onDone, generation), BUILD_POLL_MS)
         return
       }
       if (status.status === 'done') {
@@ -2545,7 +2564,7 @@ function useBuild({ appId, token, storage, rootStorage, prefix, online }) {
       finishError(status.log || 'Build failed.')
       return
     }
-    pollRef.current = setTimeout(() => poll(doc, onDone), BUILD_POLL_MS)
+    pollRef.current = setTimeout(() => poll(doc, onDone, generation), BUILD_POLL_MS)
   }, [storage, finishDone, finishError])
 
   // Kick a build for `doc` (a "files/<entry>.html" path). onDone fires once the
@@ -2557,8 +2576,9 @@ function useBuild({ appId, token, storage, rootStorage, prefix, online }) {
       finishError('You are offline. Building needs a connection — reconnect and try again.')
       return
     }
-    buildingRef.current = true
     clearPoll()
+    buildingRef.current = true
+    const generation = buildGenerationRef.current
     setBuildDoc(doc)
     setBuildStatus('building')
     setBuildLog('')
@@ -2588,7 +2608,7 @@ function useBuild({ appId, token, storage, rootStorage, prefix, online }) {
       }
       // 3. Poll status.json until the script writes its verdict.
       deadlineRef.current = Date.now() + BUILD_TIMEOUT_MS
-      pollRef.current = setTimeout(() => poll(doc, onDone), BUILD_POLL_MS)
+      pollRef.current = setTimeout(() => poll(doc, onDone, generation), BUILD_POLL_MS)
     } catch (e) {
       finishError((e && e.message) ? e.message : 'Build failed to start.')
     }
@@ -2602,7 +2622,7 @@ function useBuild({ appId, token, storage, rootStorage, prefix, online }) {
   }, [finishDone])
 
   return {
-    buildStatus, buildLog, buildDoc, entryByDoc, build, rememberEntry,
+    buildStatus, buildLog, buildDoc, entryByDoc, build, rememberEntry, clearPoll,
     forgetDoc: useCallback((doc) => {
       setEntryByDoc((prev) => {
         if (!(doc in prev)) return prev
@@ -2677,6 +2697,8 @@ export default function App({ appId, token }) {
   const [chatRatio, setChatRatio] = useState(() => readChatRatio(appId))
   const [publishedUrl, setPublishedUrl] = useState(null)
   const [publishing, setPublishing] = useState(false)
+  const publishingRef = useRef(false)
+  useEffect(() => { publishingRef.current = publishing }, [publishing])
   // Viewer mode, toggled by the [Source | Preview] segmented control. 'source'
   // shows the editable CodeMirror source; 'preview' shows the MAIN page's built site.
   const [viewMode, setViewMode] = useState('source')
@@ -2689,6 +2711,7 @@ export default function App({ appId, token }) {
   useEffect(() => { mainPathRef.current = mainPath }, [mainPath])
   const mainResolvedRef = useRef(false)
   const build = useBuild({ appId, token, storage, rootStorage, prefix: activePrefix, online })
+  const clearBuildPoll = build.clearPoll
   const seenBuildStatusRef = useRef('')
   const hydratedProjectRef = useRef(activeProjectId)
   const activeProject = projects.find((p) => p.id === activeProjectId)
@@ -2747,6 +2770,7 @@ export default function App({ appId, token }) {
   }, [appId, activeProjectId, rootStorage])
 
   useEffect(() => {
+    clearBuildPoll()
     const switchingProject = hydratedProjectRef.current !== activeProjectId
     hydratedProjectRef.current = activeProjectId
     const snapshot = switchingProject ? null : readFileCache(appId, activeProjectId)
@@ -2775,7 +2799,48 @@ export default function App({ appId, token }) {
     try { navHandleRef.current?.close?.() } catch {}
     navHandleRef.current = null
     setNavOpen(false)
-  }, [appId, activeProjectId])
+  }, [appId, activeProjectId, clearBuildPoll])
+
+  useEffect(() => {
+    let cancelled = false
+    const projectParam = activeProjectId === 'default' ? '' : activeProjectId
+    ;(async () => {
+      try {
+        const r = await fetch(`/api/apps/${appId}/publish?project_id=${encodeURIComponent(projectParam)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!cancelled && r.ok) {
+          const data = await r.json()
+          if (cancelled) return
+          const url = data.url || data.published_url || data.publishedUrl || null
+          setPublishedUrl(url ? new URL(url, window.location.origin).href : null)
+          return
+        }
+      } catch {
+        // Fall back to app storage below.
+      }
+      try {
+        const toPublishedUrl = (value) => {
+          const clean = String(value || '').trim()
+          if (!clean) return null
+          if (/^https?:\/\//i.test(clean) || clean.startsWith('/')) {
+            return new URL(clean, window.location.origin).href
+          }
+          return new URL(`/apps/${appId}/published/${clean}`, window.location.origin).href
+        }
+        let stored = null
+        for (const path of ['publish-url.txt', 'published-url.txt', 'publish-token.txt']) {
+          stored = await storage.getText(path)
+          if (stored) break
+        }
+        if (cancelled) return
+        setPublishedUrl(toPublishedUrl(stored))
+      } catch {
+        if (!cancelled) setPublishedUrl(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [activeProjectId, appId, storage, token])
 
   const toggleChat = useCallback(() => {
     setChatOpen((open) => {
@@ -3597,6 +3662,7 @@ export default function App({ appId, token }) {
   }, [selectedPath, selectedIsBinary, fileSaving, storage, fileContent, refreshPending])
 
   const resetFileUi = useCallback(() => {
+    clearBuildPoll()
     filesRef.current = []
     selectedPathRef.current = null
     mainResolvedRef.current = false
@@ -3621,9 +3687,10 @@ export default function App({ appId, token }) {
     try { navHandleRef.current?.close?.() } catch {}
     navHandleRef.current = null
     setNavOpen(false)
-  }, [])
+  }, [clearBuildPoll])
 
   const switchProject = useCallback(async (id) => {
+    if (publishingRef.current) return
     if (!isSafeProjectId(id) || id === activeProjectId) return
     if (fileDirty && !fileSaving && canEditSelected) {
       await handleSaveFile()
@@ -3722,8 +3789,18 @@ export default function App({ appId, token }) {
           { title: 'Delete Project', danger: true },
         )
         if (!ok) return
-        const fallback = fresh.find((p) => p.id !== targetId)?.id || 'default'
-        const next = fresh.filter((p) => p.id !== targetId)
+        const latest = await readFreshProjects()
+        const current = latest.find((p) => p.id === targetId)
+        if (!current) {
+          await modal.alert('That project no longer exists.', { title: 'Cannot delete project' })
+          return
+        }
+        if (targetId === 'default' || latest.length <= 1) {
+          await modal.alert('The default project and the last remaining project cannot be deleted.', { title: 'Cannot delete project' })
+          return
+        }
+        const fallback = latest.find((p) => p.id !== targetId)?.id || 'default'
+        const next = latest.filter((p) => p.id !== targetId)
         try {
           await fetch(`/api/apps/${appId}/publish?project_id=${encodeURIComponent(targetId)}`, {
             method: 'DELETE',
@@ -3740,7 +3817,6 @@ export default function App({ appId, token }) {
           resetFileUi()
           writeActiveProject(appId, fallback)
           setActiveProjectId(fallback)
-          removeFileCache(appId, targetId)
         }
       } catch (e) {
         await modal.alert(e.message || String(e), { title: 'Could not delete project' })
@@ -3782,7 +3858,13 @@ export default function App({ appId, token }) {
   }, [modal])
 
   const handlePublish = useCallback(async () => {
-    if (publishing) return
+    if (publishingRef.current) return
+    const builtEntry = mainPath ? build.entryByDoc[mainPath]?.entry : null
+    if (build.buildStatus !== 'done' || !builtEntry) {
+      await modal.alert('No built site found — please Build first', { title: 'Publish failed' })
+      return
+    }
+    publishingRef.current = true
     setPublishing(true)
     try {
       const r = await fetch(`/api/apps/${appId}/publish`, {
@@ -3794,6 +3876,7 @@ export default function App({ appId, token }) {
         const data = await r.json()
         const fullUrl = new URL(data.url, window.location.origin).href
         setPublishedUrl(fullUrl)
+        try { await storage.setText('publish-url.txt', fullUrl) } catch { /* best-effort persist */ }
         await showPublishedModal(fullUrl)
         return
       }
@@ -3810,12 +3893,14 @@ export default function App({ appId, token }) {
     } catch (e) {
       await modal.alert(e.message || String(e), { title: 'Publish failed' })
     } finally {
+      publishingRef.current = false
       setPublishing(false)
     }
-  }, [activeProjectId, appId, modal, publishing, showPublishedModal, token])
+  }, [activeProjectId, appId, build.buildStatus, build.entryByDoc, mainPath, modal, showPublishedModal, storage, token])
 
   const handleUnpublish = useCallback(async () => {
-    if (publishing) return
+    if (publishingRef.current) return
+    publishingRef.current = true
     setPublishing(true)
     try {
       const projectParam = activeProjectId === 'default' ? '' : activeProjectId
@@ -3825,6 +3910,7 @@ export default function App({ appId, token }) {
       })
       if (r.ok) {
         setPublishedUrl(null)
+        try { await storage.remove('publish-url.txt') } catch { /* best-effort clear */ }
         await modal.alert('The published site was removed.', { title: 'Unpublished' })
         return
       }
@@ -3837,9 +3923,10 @@ export default function App({ appId, token }) {
     } catch (e) {
       await modal.alert(e.message || String(e), { title: 'Unpublish failed' })
     } finally {
+      publishingRef.current = false
       setPublishing(false)
     }
-  }, [activeProjectId, appId, modal, publishing, token])
+  }, [activeProjectId, appId, modal, storage, token])
 
   const handleBuild = useCallback(() => {
     // Build always assembles the site for the MAIN page (the preview renders
@@ -4624,6 +4711,14 @@ const CSS = `
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.ws-project-trigger[aria-expanded="true"] {
+  color: var(--accent);
+  background: var(--accent-dim, color-mix(in srgb, var(--accent) 12%, transparent));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+.ws-project-trigger[aria-expanded="true"] svg {
+  color: var(--accent);
+}
 .ws-project-menu {
   position: absolute;
   top: calc(100% + 6px);
@@ -4639,14 +4734,12 @@ const CSS = `
   box-shadow: 0 8px 28px var(--ws-scrim-soft);
 }
 .ws-project-list,
-.ws-project-actions,
-.ws-project-publish {
+.ws-project-actions {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.ws-project-actions,
-.ws-project-publish {
+.ws-project-actions {
   margin-top: 5px;
   padding-top: 5px;
   border-top: 1px solid var(--border);
@@ -4669,12 +4762,6 @@ const CSS = `
   align-items: center;
   gap: 6px;
   text-decoration: none;
-}
-.ws-project-action--compact {
-  justify-content: center;
-  width: auto;
-  flex: 1 1 0;
-  min-width: 0;
 }
 .ws-project-item-name {
   display: block;
@@ -4703,24 +4790,63 @@ const CSS = `
   color: var(--muted);
   font-size: 13px;
 }
-.ws-project-publish-url {
-  padding: 7px 9px;
-  color: var(--muted);
-  font: 12px/1.45 var(--mono);
-  overflow-wrap: anywhere;
-}
-.ws-project-publish-actions {
-  display: flex;
-  gap: 4px;
-}
-.ws-project-link {
-  justify-content: center;
-}
 .ws-drawer-actions {
   display: flex;
   gap: 6px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
+}
+.ws-drawer-publish {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.ws-drawer-publish-actions {
+  display: flex;
+  gap: 6px;
+}
+.ws-drawer-publish-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 40px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: 600 12px/1.2 var(--font);
+  text-decoration: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.ws-drawer-publish-btn--wide {
+  width: 100%;
+}
+.ws-drawer-publish-btn:active:not(:disabled) {
+  background: var(--surface2, var(--surface));
+}
+.ws-drawer-publish-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ws-drawer-publish-link {
+  justify-content: center;
+}
+.ws-drawer-publish-url {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  font: 12px/1.45 var(--mono);
+  overflow-wrap: anywhere;
 }
 .ws-drawer-btn {
   flex: 1 1 0;
