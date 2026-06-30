@@ -1410,12 +1410,25 @@ function FileNode({
 
 function ProjectSelector({
   projects, projectsLoaded, activeProjectId,
-  onSwitchProject, onNewProject, onRenameProject, onDeleteProject,
+  onSwitchProject, renamingId, onCommitRename, onCancelRename,
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
+  const inputRef = useRef(null)
+  // Set when Enter/Escape already resolved the edit, so the blur that fires as
+  // the input unmounts does not commit a second (or, on Escape, a cancelled) value.
+  const skipBlurRef = useRef(false)
   const active = projects.find((p) => p.id === activeProjectId) || projects[0] || DEFAULT_PROJECT
-  const canDelete = active.id !== DEFAULT_PROJECT.id && projects.length > 1
+
+  useEffect(() => {
+    if (renamingId !== active.id) return
+    skipBlurRef.current = false
+    const raf = requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [active.id, renamingId])
 
   useEffect(() => {
     if (!open) return undefined
@@ -1433,17 +1446,36 @@ function ProjectSelector({
 
   return (
     <div className="ws-project-picker" ref={ref}>
-      <button
-        type="button"
-        className="ws-project-trigger"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Switch project"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className="ws-project-trigger-name">{active.name}</span>
-        <ChevronIcon size={13} />
-      </button>
+      {renamingId === active.id ? (
+        <input
+          ref={inputRef}
+          className="ws-project-rename-input"
+          defaultValue={active.name}
+          aria-label="Project name"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { skipBlurRef.current = true; onCommitRename(active.id, e.currentTarget.value) }
+            else if (e.key === 'Escape') { skipBlurRef.current = true; onCancelRename() }
+          }}
+          onBlur={(e) => {
+            if (skipBlurRef.current) { skipBlurRef.current = false; return }
+            onCommitRename(active.id, e.currentTarget.value)
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          className="ws-project-trigger"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title="Switch project"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span className="ws-project-trigger-name">{active.name}</span>
+          <ChevronIcon size={13} />
+        </button>
+      )}
       {open && (
         <div className="ws-project-menu" role="menu">
           <div className="ws-project-list" role="group" aria-label="Projects">
@@ -1538,6 +1570,7 @@ function FileNavPanel({
   onUpload, onMove, onRename, mainPath, onSetMain, returnFocusRef,
   projects, projectsLoaded, activeProjectId,
   onSwitchProject, onNewProject, onRenameProject, onDeleteProject,
+  renamingId, onCommitProjectRename, onCancelProjectRename,
   publishedUrl, publishing, buildStatus, canPublish, onPublish, onUnpublish,
 }) {
   const root = useMemo(() => buildTree(files), [files])
@@ -1732,6 +1765,9 @@ function FileNavPanel({
             projectsLoaded={projectsLoaded}
             activeProjectId={activeProjectId}
             onSwitchProject={onSwitchProject}
+            renamingId={renamingId}
+            onCommitRename={onCommitProjectRename}
+            onCancelRename={onCancelProjectRename}
           />
           <div className="ws-project-row-actions">
             <button className="ws-icon-btn" onClick={onNewProject} disabled={!projectsLoaded} title="New project" aria-label="New project"><PlusIcon size={18} /></button>
@@ -2158,7 +2194,7 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
-const APP_VERSION = '0.10.4'
+const APP_VERSION = '0.11.0'
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
@@ -2682,6 +2718,7 @@ export default function App({ appId, token }) {
   const cached = useMemo(() => readFileCache(appId, activeProjectId), [appId, activeProjectId])
   const [projects, setProjects] = useState([])
   const [projectsLoaded, setProjectsLoaded] = useState(false)
+  const [renamingId, setRenamingId] = useState(null)
   const [files, setFiles] = useState(() => cached?.index || [])
   const filesRef = useRef(files)
   const [fileCache, setFileCache] = useState(() => cached?.contents || {})
@@ -3740,6 +3777,49 @@ export default function App({ appId, token }) {
     setActiveProjectId(id)
   }, [activeProjectId, appId, canEditSelected, fileDirty, fileSaving, handleSaveFile, resetFileUi])
 
+  const startRenameProject = useCallback((id) => setRenamingId(id), [])
+  const cancelRenameProject = useCallback(() => setRenamingId(null), [])
+
+  const commitRenameProject = useCallback(async (targetId, rawName) => {
+    const clean = String(rawName || '').trim()
+    try {
+      const fresh = await readFreshProjects()
+      const current = fresh.find((p) => p.id === targetId)
+      if (!current || !clean || clean === current.name) return
+      const next = fresh.map((p) => (p.id === targetId ? { ...p, name: clean } : p))
+      await rootStorage.setJSON('projects.json', next)
+      setProjects(next)
+    } catch (e) {
+      await modal.alert(e.message || String(e), { title: 'Could not rename project' })
+    } finally {
+      setRenamingId(null)
+    }
+  }, [modal, readFreshProjects, rootStorage])
+
+  const createAndRenameProject = useCallback(async () => {
+    if (!projectsLoaded) {
+      await modal.alert('Projects are still loading.', { title: 'Projects' })
+      return
+    }
+    if (publishingRef.current) {
+      await modal.alert('Finish publishing before creating a project.', { title: 'Publishing' })
+      return
+    }
+    const name = `Project ${projects.length + 1}`
+    try {
+      const fresh = await readFreshProjects()
+      const id = projectSlug(name, new Set(fresh.map((p) => p.id)))
+      const next = [...fresh, { id, name, createdAt: Date.now() }]
+      await rootStorage.setJSON('projects.json', next)
+      setProjects(next)
+      await switchProject(id)
+      setRenamingId(id)
+      openNavRef.current?.()
+    } catch (e) {
+      await modal.alert(e.message || String(e), { title: 'Could not create project' })
+    }
+  }, [modal, projects.length, projectsLoaded, readFreshProjects, rootStorage, switchProject])
+
   const handleProjectMenu = useCallback(async (requestedAction = null, requestedProjectId = null) => {
     if (!projectsLoaded) {
       await modal.alert('Projects are still loading.', { title: 'Projects' })
@@ -3768,47 +3848,12 @@ export default function App({ appId, token }) {
       return
     }
     if (action === 'new') {
-      const name = await modal.prompt('Project name', {
-        title: 'New Project',
-        placeholder: `Project ${projects.length + 1}`,
-      })
-      const clean = String(name || '').trim()
-      if (!clean) return
-      try {
-        const fresh = await readFreshProjects()
-        const id = projectSlug(clean, new Set(fresh.map((p) => p.id)))
-        const next = [...fresh, { id, name: clean, createdAt: Date.now() }]
-        await rootStorage.setJSON('projects.json', next)
-        setProjects(next)
-        await switchProject(id)
-      } catch (e) {
-        await modal.alert(e.message || String(e), { title: 'Could not create project' })
-      }
+      await createAndRenameProject()
       return
     }
     if (action === 'rename') {
       const targetId = requestedProjectId || activeProjectId
-      const target = projects.find((p) => p.id === targetId)
-        || { id: targetId, name: targetId === 'default' ? 'Project 1' : targetId }
-      const name = await modal.prompt('Project name', {
-        title: 'Rename Project',
-        defaultValue: target.name,
-      })
-      const clean = String(name || '').trim()
-      if (!clean || clean === target.name) return
-      try {
-        const fresh = await readFreshProjects()
-        const current = fresh.find((p) => p.id === targetId)
-        if (!current) {
-          await modal.alert('That project no longer exists.', { title: 'Could not rename project' })
-          return
-        }
-        const next = fresh.map((p) => (p.id === targetId ? { ...p, name: clean } : p))
-        await rootStorage.setJSON('projects.json', next)
-        setProjects(next)
-      } catch (e) {
-        await modal.alert(e.message || String(e), { title: 'Could not rename project' })
-      }
+      startRenameProject(targetId)
       return
     }
     if (action === 'delete') {
@@ -3866,12 +3911,14 @@ export default function App({ appId, token }) {
     activeProject,
     activeProjectId,
     appId,
+    createAndRenameProject,
     modal,
     projects,
     projectsLoaded,
     readFreshProjects,
     resetFileUi,
     rootStorage,
+    startRenameProject,
     switchProject,
     token,
   ])
@@ -4228,9 +4275,12 @@ export default function App({ appId, token }) {
           projectsLoaded={projectsLoaded}
           activeProjectId={activeProjectId}
           onSwitchProject={switchProject}
-          onNewProject={() => handleProjectMenu('new')}
-          onRenameProject={(projectId) => handleProjectMenu('rename', projectId)}
+          onNewProject={createAndRenameProject}
+          onRenameProject={startRenameProject}
           onDeleteProject={(projectId) => handleProjectMenu('delete', projectId)}
+          renamingId={renamingId}
+          onCommitProjectRename={commitRenameProject}
+          onCancelProjectRename={cancelRenameProject}
           publishedUrl={publishedUrl}
           publishing={publishing}
           buildStatus={build.buildStatus}
@@ -4759,6 +4809,21 @@ const CSS = `
 .ws-project-trigger[aria-expanded="true"] svg {
   color: var(--accent);
 }
+.ws-project-rename-input {
+  max-width: 170px;
+  min-height: 36px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: 650 12px/1.2 var(--font);
+  outline: none;
+}
+.ws-project-rename-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
 .ws-project-menu {
   position: absolute;
   top: calc(100% + 6px);
@@ -4926,6 +4991,7 @@ const CSS = `
 }
 .ws-project-row .ws-project-picker { flex: 1 1 auto; min-width: 0; }
 .ws-project-row .ws-project-trigger { width: 100%; max-width: none; justify-content: space-between; }
+.ws-project-row .ws-project-rename-input { width: 100%; max-width: none; }
 .ws-project-row-actions { display: flex; gap: 0; flex: 0 0 auto; }
 .ws-drawer-syncing {
   padding: 8px 14px;
