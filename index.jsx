@@ -2158,7 +2158,7 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
-const APP_VERSION = '0.10.3'
+const APP_VERSION = '0.10.4'
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
@@ -4114,7 +4114,7 @@ export default function App({ appId, token }) {
           {/* The app's own glossy icon is the drawer toggle, mirroring the
               Möbius shell header where the logo (not a hamburger) opens the
               drawer. The real icon image — the backend serves a downscaled
-              copy at ?size=128 (cached 1h), kept crisp at the 44px render
+              copy at ?size=128 (cached 1h), kept crisp at the 34px render
               without the old full-res PNG cost; the accent-dot fallback shows
               when an install has no custom icon (the route 404s). */}
           <button
@@ -4127,8 +4127,8 @@ export default function App({ appId, token }) {
             <img
               src={`/api/apps/${appId}/icon?size=128`}
               alt=""
-              width={44}
-              height={44}
+              width={34}
+              height={34}
               className="ws-brand-icon"
               onError={(e) => {
                 e.currentTarget.style.display = 'none'
@@ -4376,10 +4376,11 @@ const CSS = `
   .ws-nav-toggle:hover { background: var(--surface2, var(--bg-alt, var(--surface))); }
 }
 .ws-nav-toggle:focus-visible { background: var(--surface2, var(--bg-alt, var(--surface))); }
-/* The real app icon as the brand mark inside the drawer toggle. */
+/* The real app icon as the brand mark inside the drawer toggle. Sized to the
+   34px Möbius brand mark so every mini-app header icon matches the shell. */
 .ws-brand-icon {
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
   border-radius: 10px;
   object-fit: cover;
   flex-shrink: 0;
