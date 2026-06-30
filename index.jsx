@@ -2226,7 +2226,7 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
-const APP_VERSION = '0.12.0'
+const APP_VERSION = '0.12.1'
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
@@ -4323,9 +4323,14 @@ export default function App({ appId, token }) {
           onPublish={handlePublish}
           onUnpublish={handleUnpublish}
         />
-        {chatOpen ? (
+        {/* ws-content (its sandboxed preview iframe + CodeMirror) MUST render
+            unconditionally at this stable position — never inside a conditional
+            or ternary branch. Remounting it reloads the sandboxed iframe (black
+            flash) and resets the editor (lost scroll/undo/cursor). The chat
+            divider + panel are conditional SIBLINGS *after* it; never wrap this. */}
+        <main className="ws-content">{renderMain()}</main>
+        {chatOpen && (
           <>
-            <main className="ws-content">{renderMain()}</main>
             <div
               className="ws-chat-divider"
               role="separator"
@@ -4352,8 +4357,6 @@ export default function App({ appId, token }) {
               getContext={getContext}
             />
           </>
-        ) : (
-          <main className="ws-content">{renderMain()}</main>
         )}
       </div>
       {modal.node}
