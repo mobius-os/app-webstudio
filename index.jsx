@@ -1212,7 +1212,7 @@ function useLongPress(onLongPress) {
 
 function FileNode({
   node, selectedPath, onSelect, depth,
-  onContextMenu, onMoveInto, mainPath, openMenuPath, parentPath = '',
+  onContextMenu, onMoveInto, mainPath, onSetMain, openMenuPath, parentPath = '',
 }) {
   const [expanded, setExpanded] = useState(true)
   const [dropActive, setDropActive] = useState(false)
@@ -1236,6 +1236,18 @@ function FileNode({
   if (node.children.size === 0 && node.isFile) {
     const selected = node.path === selectedPath
     const isMain = node.path === mainPath
+    const isHtml = isHtmlDoc(node.path)
+    // Discoverable "set as main page" affordance: a visible accent-dot button
+    // on every HTML page that isn't already the main page, alongside the
+    // existing context-menu path (which still works). We render it as a
+    // role="button" span (not a nested <button>, invalid inside the row's own
+    // <button>) and stop propagation so tapping it sets main without also
+    // selecting/opening the file.
+    const activateSetMain = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (onSetMain) onSetMain(node.path)
+    }
     return (
       <div className="ws-tree-row">
         <button
@@ -1273,6 +1285,19 @@ function FileNode({
               title="Preview renders this page"
             />
           )}
+          {isHtml && !isMain && onSetMain && (
+            <span
+              className="ws-tree-set-main"
+              role="button"
+              tabIndex={0}
+              aria-label="Set as main page"
+              title="Set as main page (the preview will render this page)"
+              onClick={activateSetMain}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') activateSetMain(e) }}
+            >
+              <span className="ws-tree-set-main-dot" />
+            </span>
+          )}
         </button>
         <button
           type="button"
@@ -1302,6 +1327,10 @@ function FileNode({
     })
   const dropMove = (e, destDir) => {
     e.preventDefault()
+    // The folder onDrop is a DOM descendant of the root container's onDrop, so a
+    // drop onto a folder would otherwise bubble up and run the root move too —
+    // targeting the already-moved source path and 404ing. Stop propagation here.
+    e.stopPropagation()
     setDropActive(false)
     const from = e.dataTransfer.getData('text/mobius-path')
     if (!from) return
@@ -1328,6 +1357,7 @@ function FileNode({
             onContextMenu={onContextMenu}
             onMoveInto={onMoveInto}
             mainPath={mainPath}
+            onSetMain={onSetMain}
             openMenuPath={openMenuPath}
             parentPath=""
           />
@@ -1398,6 +1428,7 @@ function FileNode({
               onContextMenu={onContextMenu}
               onMoveInto={onMoveInto}
               mainPath={mainPath}
+              onSetMain={onSetMain}
               openMenuPath={openMenuPath}
               parentPath={node.path}
             />
@@ -1847,6 +1878,7 @@ function FileNavPanel({
               onContextMenu={setCtx}
               onMoveInto={onMove}
               mainPath={mainPath}
+              onSetMain={onSetMain}
               openMenuPath={ctx ? ctx.path : null}
             />
           )}
@@ -2194,7 +2226,7 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
-const APP_VERSION = '0.11.0'
+const APP_VERSION = '0.12.0'
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
@@ -2753,6 +2785,8 @@ export default function App({ appId, token }) {
   const fileContentRef = useRef(fileContent)
   const fileDirtyRef = useRef(fileDirty)
   const fileSavingRef = useRef(fileSaving)
+  // The in-flight autosave write, so flushDirtyEdits can AWAIT it (not poll a flag).
+  const savePromiseRef = useRef(null)
   useEffect(() => { fileContentRef.current = fileContent }, [fileContent])
   useEffect(() => { fileDirtyRef.current = fileDirty }, [fileDirty])
   useEffect(() => { fileSavingRef.current = fileSaving }, [fileSaving])
@@ -2781,8 +2815,6 @@ export default function App({ appId, token }) {
   const clearBuildPoll = build.clearPoll
   const seenBuildStatusRef = useRef('')
   const hydratedProjectRef = useRef(activeProjectId)
-  const activeProject = projects.find((p) => p.id === activeProjectId)
-    || { id: activeProjectId, name: activeProjectId === 'default' ? 'Project 1' : activeProjectId }
   const readFreshProjects = useCallback(async () => {
     try {
       const stored = await rootStorage.getFresh('projects.json')
@@ -3392,7 +3424,7 @@ export default function App({ appId, token }) {
   const handleCreateFile = useCallback(async () => {
     if (!(await ensureIndexWritable())) return
     const name = await modal.prompt(
-      'Path under files/ — e.g. about.html or css/site.css',
+      'File path — e.g. about.html or css/site.css',
       { title: 'New file', placeholder: 'about.html' },
     )
     if (!name) return
@@ -3430,7 +3462,7 @@ export default function App({ appId, token }) {
   const handleCreateFolder = useCallback(async () => {
     if (!(await ensureIndexWritable())) return
     const name = await modal.prompt(
-      'Folder name under files/ — e.g. css or img/icons',
+      'Folder name — e.g. css or img/icons',
       { title: 'New folder', placeholder: 'css' },
     )
     if (!name) return
@@ -3439,7 +3471,20 @@ export default function App({ appId, token }) {
       await modal.alert('Use letters, digits, . - _ / only.', { title: 'Invalid name' })
       return
     }
-    const path = `files/${clean}/.keep`
+    const dir = `files/${clean}`
+    // A path can't be both a file and a folder. Mirror handleCreateFile's guard:
+    // if a file already uses this name, refuse instead of letting the backend
+    // reject the .keep write with an opaque error.
+    if (filesRef.current.includes(dir)) {
+      await modal.alert(`A file named “${clean.split('/').pop()}” already exists here — a file and a folder can’t share a name.`, { title: 'Name taken' })
+      return
+    }
+    // If the folder already exists (its .keep, or any file under it), say so.
+    if (filesRef.current.some((p) => p === `${dir}/.keep` || p.startsWith(`${dir}/`))) {
+      await modal.alert(`A folder named “${clean.split('/').pop()}” already exists here.`, { title: 'Name taken' })
+      return
+    }
+    const path = `${dir}/.keep`
     try {
       await storage.setText(path, '')
       const next = [...filesRef.current, path].sort()
@@ -3723,20 +3768,42 @@ export default function App({ appId, token }) {
   ])
 
   const handleSaveFile = useCallback(async () => {
-    if (!selectedPath || selectedIsBinary || isManagedJsonPath(selectedPath) || fileSaving) return
+    if (!selectedPath || selectedIsBinary || isManagedJsonPath(selectedPath) || fileSaving) {
+      return savePromiseRef.current
+    }
     setFileSaving(true)
     setFileError(null)
-    try {
-      await storage.setText(selectedPath, fileContent)
-      setFileDirty(false)
-      setFileCache((prev) => ({ ...prev, [selectedPath]: fileContent }))
-      refreshPending()
-    } catch (e) {
-      setFileError(e.message || 'Could not save file.')
-    } finally {
-      setFileSaving(false)
-    }
+    const p = (async () => {
+      try {
+        await storage.setText(selectedPath, fileContent)
+        setFileDirty(false)
+        setFileCache((prev) => ({ ...prev, [selectedPath]: fileContent }))
+        refreshPending()
+      } catch (e) {
+        setFileError(e.message || 'Could not save file.')
+      } finally {
+        setFileSaving(false)
+        savePromiseRef.current = null
+      }
+    })()
+    savePromiseRef.current = p
+    return p
   }, [selectedPath, selectedIsBinary, fileSaving, storage, fileContent, refreshPending])
+
+  // Persist the editor's latest text before a reset (project switch/create)
+  // throws away the dirty buffer. The debounced autosave may have a write in
+  // flight when this fires; handleSaveFile no-ops while fileSaving is true, so
+  // we first wait for that in-flight write to settle, then call handleSaveFile
+  // — which writes fileContentRef.current/fileContent, i.e. the LATEST text,
+  // not the (possibly stale) snapshot the in-flight autosave was persisting.
+  const flushDirtyEdits = useCallback(async () => {
+    if (!fileDirtyRef.current && !fileSavingRef.current) return
+    if (!canEditSelected) return
+    // Await any in-flight autosave (so handleSaveFile won't early-return on it),
+    // then persist the latest editor text if it is still dirty.
+    if (savePromiseRef.current) await savePromiseRef.current
+    if (fileDirtyRef.current) await handleSaveFile()
+  }, [canEditSelected, handleSaveFile])
 
   const resetFileUi = useCallback(() => {
     clearBuildPoll()
@@ -3769,13 +3836,14 @@ export default function App({ appId, token }) {
   const switchProject = useCallback(async (id) => {
     if (publishingRef.current) return
     if (!isSafeProjectId(id) || id === activeProjectId) return
-    if (fileDirty && !fileSaving && canEditSelected) {
-      await handleSaveFile()
-    }
+    // Flush dirty edits (awaiting any in-flight autosave) before resetFileUi
+    // discards the buffer — otherwise keystrokes typed during an in-flight
+    // autosave are lost.
+    await flushDirtyEdits()
     resetFileUi()
     writeActiveProject(appId, id)
     setActiveProjectId(id)
-  }, [activeProjectId, appId, canEditSelected, fileDirty, fileSaving, handleSaveFile, resetFileUi])
+  }, [activeProjectId, appId, flushDirtyEdits, resetFileUi])
 
   const startRenameProject = useCallback((id) => setRenamingId(id), [])
   const cancelRenameProject = useCallback(() => setRenamingId(null), [])
@@ -3813,113 +3881,80 @@ export default function App({ appId, token }) {
       await rootStorage.setJSON('projects.json', next)
       setProjects(next)
       await switchProject(id)
-      setRenamingId(id)
-      openNavRef.current?.()
+      // switchProject early-returns (without making `id` active) if the user
+      // tapped Publish during the await window. Only open the inline rename if
+      // the switch actually took effect — otherwise we'd open a rename on a
+      // non-active project. The project still exists and is recoverable.
+      if (!publishingRef.current) {
+        setRenamingId(id)
+        openNavRef.current?.()
+      }
     } catch (e) {
       await modal.alert(e.message || String(e), { title: 'Could not create project' })
     }
   }, [modal, projects.length, projectsLoaded, readFreshProjects, rootStorage, switchProject])
 
-  const handleProjectMenu = useCallback(async (requestedAction = null, requestedProjectId = null) => {
+  const handleDeleteProject = useCallback(async (targetId) => {
     if (!projectsLoaded) {
       await modal.alert('Projects are still loading.', { title: 'Projects' })
       return
     }
-    const action = requestedAction || await modal.choose(`Active project: ${activeProject.name}`, {
-      title: 'Projects',
-      actions: [
-        { label: 'New Project', value: 'new' },
-        { label: 'Switch Project', value: 'switch', disabled: projects.length < 2 },
-        { label: 'Rename Project', value: 'rename' },
-        { label: 'Delete Project', value: 'delete', danger: true, disabled: activeProjectId === 'default' || projects.length <= 1 },
-      ],
-    })
-    if (!action) return
-    if (action === 'switch') {
-      const nextId = await modal.choose('Choose a project to open.', {
-        title: 'Switch Project',
-        actions: projects.map((p) => ({
-          label: p.id === activeProjectId ? `${p.name} (current)` : p.name,
-          value: p.id,
-          disabled: p.id === activeProjectId,
-        })),
-      })
-      if (nextId) await switchProject(nextId)
-      return
-    }
-    if (action === 'new') {
-      await createAndRenameProject()
-      return
-    }
-    if (action === 'rename') {
-      const targetId = requestedProjectId || activeProjectId
-      startRenameProject(targetId)
-      return
-    }
-    if (action === 'delete') {
-      const targetId = requestedProjectId || activeProjectId
-      try {
-        const fresh = await readFreshProjects()
-        const target = fresh.find((p) => p.id === targetId)
-        if (!target) {
-          await modal.alert('That project no longer exists.', { title: 'Cannot delete project' })
-          return
-        }
-        if (targetId === 'default' || fresh.length <= 1) {
-          await modal.alert('The default project and the last remaining project cannot be deleted.', { title: 'Cannot delete project' })
-          return
-        }
-        const ok = await modal.confirm(
-          `Delete “${target.name}” and all of its files, builds, and chat history? This cannot be undone.`,
-          { title: 'Delete Project', danger: true },
-        )
-        if (!ok) return
-        const latest = await readFreshProjects()
-        const current = latest.find((p) => p.id === targetId)
-        if (!current) {
-          await modal.alert('That project no longer exists.', { title: 'Cannot delete project' })
-          return
-        }
-        if (targetId === 'default' || latest.length <= 1) {
-          await modal.alert('The default project and the last remaining project cannot be deleted.', { title: 'Cannot delete project' })
-          return
-        }
-        const fallback = latest.find((p) => p.id !== targetId)?.id || 'default'
-        const next = latest.filter((p) => p.id !== targetId)
-        try {
-          await fetch(`/api/apps/${appId}/publish?project_id=${encodeURIComponent(targetId)}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${token}` },
-          })
-        } catch {
-          // Best-effort cleanup only.
-        }
-        await deleteStorageTree(rootStorage, projectPrefix(targetId))
-        await rootStorage.setJSON('projects.json', next)
-        setProjects(next)
-        removeFileCache(appId, targetId)
-        if (targetId === activeProjectId) {
-          resetFileUi()
-          writeActiveProject(appId, fallback)
-          setActiveProjectId(fallback)
-        }
-      } catch (e) {
-        await modal.alert(e.message || String(e), { title: 'Could not delete project' })
+    try {
+      const fresh = await readFreshProjects()
+      const target = fresh.find((p) => p.id === targetId)
+      if (!target) {
+        await modal.alert('That project no longer exists.', { title: 'Cannot delete project' })
+        return
       }
+      if (targetId === 'default' || fresh.length <= 1) {
+        await modal.alert('The default project and the last remaining project cannot be deleted.', { title: 'Cannot delete project' })
+        return
+      }
+      const ok = await modal.confirm(
+        `Delete “${target.name}” and all of its files, builds, and chat history? This cannot be undone.`,
+        { title: 'Delete Project', danger: true },
+      )
+      if (!ok) return
+      const latest = await readFreshProjects()
+      const current = latest.find((p) => p.id === targetId)
+      if (!current) {
+        await modal.alert('That project no longer exists.', { title: 'Cannot delete project' })
+        return
+      }
+      if (targetId === 'default' || latest.length <= 1) {
+        await modal.alert('The default project and the last remaining project cannot be deleted.', { title: 'Cannot delete project' })
+        return
+      }
+      const fallback = latest.find((p) => p.id !== targetId)?.id || 'default'
+      const next = latest.filter((p) => p.id !== targetId)
+      try {
+        await fetch(`/api/apps/${appId}/publish?project_id=${encodeURIComponent(targetId)}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      } catch {
+        // Best-effort cleanup only.
+      }
+      await deleteStorageTree(rootStorage, projectPrefix(targetId))
+      await rootStorage.setJSON('projects.json', next)
+      setProjects(next)
+      removeFileCache(appId, targetId)
+      if (targetId === activeProjectId) {
+        resetFileUi()
+        writeActiveProject(appId, fallback)
+        setActiveProjectId(fallback)
+      }
+    } catch (e) {
+      await modal.alert(e.message || String(e), { title: 'Could not delete project' })
     }
   }, [
-    activeProject,
     activeProjectId,
     appId,
-    createAndRenameProject,
     modal,
-    projects,
     projectsLoaded,
     readFreshProjects,
     resetFileUi,
     rootStorage,
-    startRenameProject,
-    switchProject,
     token,
   ])
 
@@ -4277,7 +4312,7 @@ export default function App({ appId, token }) {
           onSwitchProject={switchProject}
           onNewProject={createAndRenameProject}
           onRenameProject={startRenameProject}
-          onDeleteProject={(projectId) => handleProjectMenu('delete', projectId)}
+          onDeleteProject={handleDeleteProject}
           renamingId={renamingId}
           onCommitProjectRename={commitRenameProject}
           onCancelProjectRename={cancelRenameProject}
@@ -5137,6 +5172,37 @@ const CSS = `
   width: 7px;
   height: 7px;
   border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+/* Discoverable "set as main page" affordance: a muted accent dot on the right
+   of every non-main HTML row, brightening on hover/focus. It's the visible
+   twin of the context-menu's "Set as main page" item. */
+.ws-tree-set-main {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  opacity: 0.55;
+  cursor: pointer;
+}
+.ws-tree-set-main-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+.ws-tree-set-main:hover,
+.ws-tree-set-main:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.ws-tree-set-main:hover .ws-tree-set-main-dot,
+.ws-tree-set-main:focus-visible .ws-tree-set-main-dot {
   background: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
