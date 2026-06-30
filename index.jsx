@@ -2155,7 +2155,7 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
-const APP_VERSION = '0.10.0'
+const APP_VERSION = '0.10.1'
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
@@ -2674,7 +2674,7 @@ export default function App({ appId, token }) {
   const activePrefix = useMemo(() => projectPrefix(activeProjectId), [activeProjectId])
   const storage = useMemo(() => scopedStorage(rootStorage, activePrefix), [rootStorage, activePrefix])
   const online = useOnline()
-  const modal = useModal()
+  const rawModal = useModal()
   const bodyRef = useRef(null)
   const cached = useMemo(() => readFileCache(appId, activeProjectId), [appId, activeProjectId])
   const [projects, setProjects] = useState([])
@@ -2685,6 +2685,22 @@ export default function App({ appId, token }) {
   const [indexLoaded, setIndexLoaded] = useState(false)
   const [navOpen, setNavOpen] = useState(false)
   const navHandleRef = useRef(null)
+  const navOpenRef = useRef(false)
+  useEffect(() => { navOpenRef.current = navOpen }, [navOpen])
+  const openNavRef = useRef(null)
+  // Modals ride the shell's single-surface nav, which closes the drawer when a
+  // modal opens. Wrap the modal API once so any prompt/confirm/alert/choose
+  // re-opens the drawer afterward if it was open — e.g. cancelling a rename
+  // returns to the drawer instead of leaving it closed.
+  const modal = useMemo(() => {
+    const wrap = (name) => (...args) => {
+      const wasOpen = navOpenRef.current
+      return Promise.resolve(rawModal[name](...args)).finally(() => {
+        if (wasOpen && openNavRef.current) openNavRef.current()
+      })
+    }
+    return { node: rawModal.node, alert: wrap('alert'), confirm: wrap('confirm'), prompt: wrap('prompt'), choose: wrap('choose') }
+  }, [rawModal])
   const navToggleRef = useRef(null)
   const [selectedPath, setSelectedPath] = useState(() => cached?.lastPath || null)
   const selectedPathRef = useRef(selectedPath)
@@ -2957,7 +2973,8 @@ export default function App({ appId, token }) {
   }, [])
 
   const openNav = useCallback(async () => {
-    if (navOpen) return
+    if (navOpenRef.current) return
+    navOpenRef.current = true
     if (window.mobius?.nav?.open) {
       const handle = window.mobius.nav.open('webstudio-drawer', () => {
         navHandleRef.current = null
@@ -2968,7 +2985,8 @@ export default function App({ appId, token }) {
       if (navHandleRef.current !== handle) return
     }
     setNavOpen(true)
-  }, [navOpen])
+  }, [])
+  useEffect(() => { openNavRef.current = openNav }, [openNav])
 
   const toggleNav = useCallback(() => {
     if (navOpen) closeNav()
@@ -4740,7 +4758,7 @@ const CSS = `
 .ws-project-menu {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
+  left: 0;
   z-index: 65;
   width: min(230px, 78vw);
   max-height: min(420px, 70vh);
