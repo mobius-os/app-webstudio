@@ -1067,6 +1067,43 @@ function PencilIcon({ size = 16 }) {
     </svg>
   )
 }
+function PlusIcon({ size = 18 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+function NewFileIcon({ size = 17 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" />
+      <path d="M14 3v6h6" />
+      <path d="M12 12v6M9 15h6" />
+    </svg>
+  )
+}
+function NewFolderIcon({ size = 17 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.6.8l.9 1.2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+      <path d="M12 11v5M9.5 13.5h5" />
+    </svg>
+  )
+}
+function UploadIcon({ size = 17 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 15V4" />
+      <path d="M8 8l4-4 4 4" />
+      <path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+    </svg>
+  )
+}
 function TrashIcon({ size = 16 }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none"
@@ -1099,6 +1136,10 @@ function ContextMenu({ x, y, items, onClose }) {
   const ref = useRef(null)
   useEffect(() => {
     const onDown = (e) => {
+      // A press on a popover trigger (a row kebab) is owned by that trigger's
+      // click, which toggles this menu. Closing here on the same pointerdown
+      // would close-then-reopen, so the menu could never toggle shut.
+      if (e.target && e.target.closest && e.target.closest('[data-popover-trigger]')) return
       if (ref.current && !ref.current.contains(e.target)) onClose()
     }
     const onKey = (e) => { if (e.key === 'Escape') onClose() }
@@ -1185,9 +1226,13 @@ function FileNode({
   const openMenuFromButton = useCallback((e, isFolderItem) => {
     e.preventDefault()
     e.stopPropagation()
+    // Toggle: a second press on this row's kebab closes its menu. The
+    // ContextMenu's outside-close ignores [data-popover-trigger], so it can't
+    // close-then-reopen on the same press (the old toggle-never-fires bug).
+    if (openMenuPath === node.path) { onContextMenu(null); return }
     const r = e.currentTarget.getBoundingClientRect()
     onContextMenu({ x: r.right, y: r.bottom, path: node.path, isFolder: isFolderItem })
-  }, [node.path, onContextMenu])
+  }, [openMenuPath, node.path, onContextMenu])
   if (node.children.size === 0 && node.isFile) {
     const selected = node.path === selectedPath
     const isMain = node.path === mainPath
@@ -1231,7 +1276,7 @@ function FileNode({
         </button>
         <button
           type="button"
-          className="ws-tree-menu-btn"
+          className="ws-tree-menu-btn" data-popover-trigger=""
           data-state={openMenuPath === node.path ? 'open' : 'closed'}
           aria-label={`Actions for ${node.name}`}
           aria-haspopup="menu"
@@ -1330,7 +1375,7 @@ function FileNode({
         </button>
         <button
           type="button"
-          className="ws-tree-menu-btn"
+          className="ws-tree-menu-btn" data-popover-trigger=""
           data-state={openMenuPath === node.path ? 'open' : 'closed'}
           aria-label={`Actions for ${node.name} folder`}
           aria-haspopup="menu"
@@ -1420,35 +1465,6 @@ function ProjectSelector({
               <div className="ws-project-loading">Loading projects...</div>
             )}
           </div>
-          <div className="ws-project-actions" role="group" aria-label="Project actions">
-            <button
-              type="button"
-              role="menuitem"
-              className="ws-project-action"
-              onClick={() => { setOpen(false); onNewProject() }}
-              disabled={!projectsLoaded}
-            >
-              New Project
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="ws-project-action"
-              onClick={() => { setOpen(false); onRenameProject(active.id) }}
-              disabled={!projectsLoaded}
-            >
-              Rename
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="ws-project-action ws-project-action--danger"
-              disabled={!projectsLoaded || !canDelete}
-              onClick={() => { setOpen(false); onDeleteProject(active.id) }}
-            >
-              Delete
-            </button>
-          </div>
         </div>
       )}
     </div>
@@ -1456,9 +1472,8 @@ function ProjectSelector({
 }
 
 function PublishDrawerAction({
-  publishedUrl, publishing, buildStatus, onPublish, onUnpublish,
+  publishedUrl, publishing, canPublish, onPublish, onUnpublish,
 }) {
-  const canPublish = buildStatus === 'done'
   return (
     <div className="ws-drawer-publish" aria-label="Publish">
       {publishedUrl ? (
@@ -1523,7 +1538,7 @@ function FileNavPanel({
   onUpload, onMove, onRename, mainPath, onSetMain, returnFocusRef,
   projects, projectsLoaded, activeProjectId,
   onSwitchProject, onNewProject, onRenameProject, onDeleteProject,
-  publishedUrl, publishing, buildStatus, onPublish, onUnpublish,
+  publishedUrl, publishing, buildStatus, canPublish, onPublish, onUnpublish,
 }) {
   const root = useMemo(() => buildTree(files), [files])
   const treeRef = useRef(null)
@@ -1711,30 +1726,23 @@ function FileNavPanel({
         onTouchEnd={onDrawerTouchEnd}
         onTouchCancel={onDrawerTouchCancel}
       >
-        <div className="ws-drawer-head">
-          <div className="ws-drawer-head-text">
-            <span className="ws-drawer-title">Files</span>
-          </div>
+        <div className="ws-project-row">
           <ProjectSelector
             projects={projects}
             projectsLoaded={projectsLoaded}
             activeProjectId={activeProjectId}
             onSwitchProject={onSwitchProject}
-            onNewProject={onNewProject}
-            onRenameProject={onRenameProject}
-            onDeleteProject={onDeleteProject}
           />
+          <div className="ws-project-row-actions">
+            <button className="ws-icon-btn" onClick={onNewProject} disabled={!projectsLoaded} title="New project" aria-label="New project"><PlusIcon size={18} /></button>
+            <button className="ws-icon-btn" onClick={() => onRenameProject(activeProjectId)} disabled={!projectsLoaded} title="Rename project" aria-label="Rename project"><PencilIcon size={15} /></button>
+            <button className="ws-icon-btn ws-icon-btn--danger" onClick={() => onDeleteProject(activeProjectId)} disabled={!projectsLoaded || activeProjectId === DEFAULT_PROJECT.id || projects.length <= 1} title="Delete project" aria-label="Delete project"><TrashIcon size={15} /></button>
+          </div>
         </div>
         <div className="ws-drawer-actions">
-          <button className="ws-drawer-btn" onClick={onCreateFile} disabled={!canMutate}>New file</button>
-          <button className="ws-drawer-btn" onClick={onCreateFolder} disabled={!canMutate}>New folder</button>
-          <button
-            className="ws-drawer-btn"
-            onClick={() => fileInputRef.current && fileInputRef.current.click()}
-            disabled={!canMutate}
-          >
-            Upload
-          </button>
+          <button className="ws-icon-btn" onClick={onCreateFile} disabled={!canMutate} title="New file" aria-label="New file"><NewFileIcon size={17} /></button>
+          <button className="ws-icon-btn" onClick={onCreateFolder} disabled={!canMutate} title="New folder" aria-label="New folder"><NewFolderIcon size={17} /></button>
+          <button className="ws-icon-btn" onClick={() => fileInputRef.current && fileInputRef.current.click()} disabled={!canMutate} title="Upload" aria-label="Upload"><UploadIcon size={17} /></button>
           {/* Hidden file/folder pickers. Materialise the FileList into a real
               array SYNCHRONOUSLY before resetting input.value: onUpload is async
               (it awaits before reading the list), and `e.target.value = ''`
@@ -1767,7 +1775,7 @@ function FileNavPanel({
         <PublishDrawerAction
           publishedUrl={publishedUrl}
           publishing={publishing}
-          buildStatus={buildStatus}
+          canPublish={canPublish}
           onPublish={onPublish}
           onUnpublish={onUnpublish}
         />
@@ -2147,7 +2155,7 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
-const APP_VERSION = '0.9.3'
+const APP_VERSION = '0.10.0'
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
@@ -2698,6 +2706,9 @@ export default function App({ appId, token }) {
   const [publishedUrl, setPublishedUrl] = useState(null)
   const [publishing, setPublishing] = useState(false)
   const publishingRef = useRef(false)
+  // Bumped on every publish/unpublish; the restore effect captures it and skips
+  // its async setState if a newer publish/unpublish landed meanwhile (#7).
+  const publishEpochRef = useRef(0)
   useEffect(() => { publishingRef.current = publishing }, [publishing])
   // Viewer mode, toggled by the [Source | Preview] segmented control. 'source'
   // shows the editable CodeMirror source; 'preview' shows the MAIN page's built site.
@@ -2803,6 +2814,7 @@ export default function App({ appId, token }) {
 
   useEffect(() => {
     let cancelled = false
+    const epoch = publishEpochRef.current
     const projectParam = activeProjectId === 'default' ? '' : activeProjectId
     ;(async () => {
       try {
@@ -2811,7 +2823,7 @@ export default function App({ appId, token }) {
         })
         if (!cancelled && r.ok) {
           const data = await r.json()
-          if (cancelled) return
+          if (cancelled || epoch !== publishEpochRef.current) return
           const url = data.url || data.published_url || data.publishedUrl || null
           setPublishedUrl(url ? new URL(url, window.location.origin).href : null)
           return
@@ -2833,10 +2845,10 @@ export default function App({ appId, token }) {
           stored = await storage.getText(path)
           if (stored) break
         }
-        if (cancelled) return
+        if (cancelled || epoch !== publishEpochRef.current) return
         setPublishedUrl(toPublishedUrl(stored))
       } catch {
-        if (!cancelled) setPublishedUrl(null)
+        if (!cancelled && epoch === publishEpochRef.current) setPublishedUrl(null)
       }
     })()
     return () => { cancelled = true }
@@ -3334,6 +3346,13 @@ export default function App({ appId, token }) {
     const path = `files/${clean}`
     if (filesRef.current.includes(path)) {
       await modal.alert(`“${path}” already exists.`, { title: 'Name taken' })
+      return
+    }
+    // A path can't be both a file and a folder. If a folder already uses this
+    // name (some file lives under `${path}/`), say so clearly instead of letting
+    // the backend reject the write with an opaque error.
+    if (filesRef.current.some((p) => p.startsWith(`${path}/`))) {
+      await modal.alert(`A folder named “${clean.split('/').pop()}” already exists here — a file and a folder can’t share a name.`, { title: 'Name taken' })
       return
     }
     try {
@@ -3876,8 +3895,11 @@ export default function App({ appId, token }) {
         const data = await r.json()
         const fullUrl = new URL(data.url, window.location.origin).href
         setPublishedUrl(fullUrl)
+        publishEpochRef.current += 1
         try { await storage.setText('publish-url.txt', fullUrl) } catch { /* best-effort persist */ }
-        await showPublishedModal(fullUrl)
+        // No blocking modal — opening one rides the shell nav stack and closes
+        // the drawer. The drawer's publish row now shows the URL + Copy/Open/
+        // Unpublish inline, so the drawer stays open with the result visible.
         return
       }
       if (r.status === 400) {
@@ -3896,7 +3918,7 @@ export default function App({ appId, token }) {
       publishingRef.current = false
       setPublishing(false)
     }
-  }, [activeProjectId, appId, build.buildStatus, build.entryByDoc, mainPath, modal, showPublishedModal, storage, token])
+  }, [activeProjectId, appId, build.buildStatus, build.entryByDoc, mainPath, modal, storage, token])
 
   const handleUnpublish = useCallback(async () => {
     if (publishingRef.current) return
@@ -3910,8 +3932,8 @@ export default function App({ appId, token }) {
       })
       if (r.ok) {
         setPublishedUrl(null)
+        publishEpochRef.current += 1
         try { await storage.remove('publish-url.txt') } catch { /* best-effort clear */ }
-        await modal.alert('The published site was removed.', { title: 'Unpublished' })
         return
       }
       let detail = ''
@@ -4096,7 +4118,6 @@ export default function App({ appId, token }) {
             <span className="ws-brand-fallback" style={{ display: 'none' }} aria-hidden="true" />
           </button>
           <div className="ws-top-title">
-            <span className="ws-project-label" title={activeProject.name}>{activeProject.name}</span>
             {openName
               ? <span className="ws-top-path" title={selectedPath}>{openName}</span>
               : <span className="ws-top-path ws-top-path--muted">No file open</span>}
@@ -4192,6 +4213,7 @@ export default function App({ appId, token }) {
           publishedUrl={publishedUrl}
           publishing={publishing}
           buildStatus={build.buildStatus}
+          canPublish={build.buildStatus === 'done' && !!(mainPath && build.entryByDoc[mainPath]?.entry)}
           onPublish={handlePublish}
           onUnpublish={handleUnpublish}
         />
@@ -4333,10 +4355,6 @@ const CSS = `
   .ws-nav-toggle:hover { background: var(--surface2, var(--bg-alt, var(--surface))); }
 }
 .ws-nav-toggle:focus-visible { background: var(--surface2, var(--bg-alt, var(--surface))); }
-.ws-nav-toggle[aria-expanded="true"] {
-  color: var(--accent);
-  background: var(--accent-dim, color-mix(in srgb, var(--accent) 12%, transparent));
-}
 /* The real app icon as the brand mark inside the drawer toggle. */
 .ws-brand-icon {
   width: 44px;
@@ -4733,16 +4751,10 @@ const CSS = `
   background: var(--bg);
   box-shadow: 0 8px 28px var(--ws-scrim-soft);
 }
-.ws-project-list,
-.ws-project-actions {
+.ws-project-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-.ws-project-actions {
-  margin-top: 5px;
-  padding-top: 5px;
-  border-top: 1px solid var(--border);
 }
 .ws-project-item,
 .ws-project-action {
@@ -4792,8 +4804,8 @@ const CSS = `
 }
 .ws-drawer-actions {
   display: flex;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 2px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border);
 }
 .ws-drawer-publish {
@@ -4864,6 +4876,25 @@ const CSS = `
 }
 .ws-drawer-btn:active { background: var(--surface2, var(--surface)); }
 .ws-drawer-btn:disabled { opacity: 0.45; cursor: default; }
+.ws-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; padding: 0;
+  border-radius: 7px; border: 1px solid transparent;
+  background: transparent; color: var(--muted);
+  cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.ws-icon-btn:hover { background: var(--surface2, var(--surface)); color: var(--text); }
+.ws-icon-btn:active:not(:disabled) { background: var(--surface3, var(--surface2)); transform: scale(0.94); }
+.ws-icon-btn:disabled { opacity: 0.3; cursor: default; }
+.ws-icon-btn--danger:hover { color: var(--danger, #f87171); }
+.ws-project-row {
+  display: flex; align-items: center; gap: 4px;
+  padding: 7px 8px 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.ws-project-row .ws-project-picker { flex: 1 1 auto; min-width: 0; }
+.ws-project-row .ws-project-trigger { width: 100%; max-width: none; justify-content: space-between; }
+.ws-project-row-actions { display: flex; gap: 0; flex: 0 0 auto; }
 .ws-drawer-syncing {
   padding: 8px 14px;
   font-size: 12px;
@@ -4893,6 +4924,7 @@ const CSS = `
   display: flex;
   align-items: stretch;
   width: 100%;
+  gap: 2px;
 }
 .ws-tree-file, .ws-tree-folder {
   display: flex;
