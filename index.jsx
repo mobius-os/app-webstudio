@@ -1316,7 +1316,7 @@ function FileNode({
         className={`ws-tree-root ${dropActive ? 'ws-tree-drop-active' : ''}`}
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropActive(true) }}
         onDragLeave={() => setDropActive(false)}
-        onDrop={(e) => dropMove(e, '')}
+        onDrop={(e) => dropMove(e, node.path)}
       >
         {sortedChildren.map((c) => (
           <FileNode
@@ -1740,9 +1740,12 @@ function FileNavPanel({
           </div>
         </div>
         <div className="ws-drawer-actions">
-          <button className="ws-icon-btn" onClick={onCreateFile} disabled={!canMutate} title="New file" aria-label="New file"><NewFileIcon size={17} /></button>
-          <button className="ws-icon-btn" onClick={onCreateFolder} disabled={!canMutate} title="New folder" aria-label="New folder"><NewFolderIcon size={17} /></button>
-          <button className="ws-icon-btn" onClick={() => fileInputRef.current && fileInputRef.current.click()} disabled={!canMutate} title="Upload" aria-label="Upload"><UploadIcon size={17} /></button>
+          <span className="ws-files-label">Files</span>
+          <div className="ws-files-actions">
+            <button className="ws-icon-btn" onClick={onCreateFile} disabled={!canMutate} title="New file" aria-label="New file"><NewFileIcon size={17} /></button>
+            <button className="ws-icon-btn" onClick={onCreateFolder} disabled={!canMutate} title="New folder" aria-label="New folder"><NewFolderIcon size={17} /></button>
+            <button className="ws-icon-btn" onClick={() => fileInputRef.current && fileInputRef.current.click()} disabled={!canMutate} title="Upload" aria-label="Upload"><UploadIcon size={17} /></button>
+          </div>
           {/* Hidden file/folder pickers. Materialise the FileList into a real
               array SYNCHRONOUSLY before resetting input.value: onUpload is async
               (it awaits before reading the list), and `e.target.value = ''`
@@ -1801,7 +1804,7 @@ function FileNavPanel({
             ) : null
           ) : (
             <FileNode
-              node={root}
+              node={root.children.get('files') || root}
               selectedPath={selectedPath}
               onSelect={(p) => { onSelect(p); onClose() }}
               depth={-1}
@@ -2155,7 +2158,7 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
-const APP_VERSION = '0.10.1'
+const APP_VERSION = '0.10.2'
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
@@ -4760,7 +4763,7 @@ const CSS = `
   top: calc(100% + 6px);
   left: 0;
   z-index: 65;
-  width: min(230px, 78vw);
+  width: min(264px, 82vw);
   max-height: min(420px, 70vh);
   overflow: auto;
   padding: 5px;
@@ -4795,9 +4798,9 @@ const CSS = `
 }
 .ws-project-item-name {
   display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
 }
 .ws-project-item--active {
   background: var(--accent-dim);
@@ -4822,10 +4825,20 @@ const CSS = `
 }
 .ws-drawer-actions {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 2px;
-  padding: 6px 8px;
+  padding: 4px 6px 4px 12px;
   border-bottom: 1px solid var(--border);
 }
+.ws-files-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ws-files-actions { display: flex; gap: 2px; }
 .ws-drawer-publish {
   display: flex;
   flex-direction: column;
