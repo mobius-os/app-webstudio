@@ -1739,6 +1739,13 @@ function FileNavPanel({
             <button className="ws-icon-btn ws-icon-btn--danger" onClick={() => onDeleteProject(activeProjectId)} disabled={!projectsLoaded || activeProjectId === DEFAULT_PROJECT.id || projects.length <= 1} title="Delete project" aria-label="Delete project"><TrashIcon size={15} /></button>
           </div>
         </div>
+        <PublishDrawerAction
+          publishedUrl={publishedUrl}
+          publishing={publishing}
+          canPublish={canPublish}
+          onPublish={onPublish}
+          onUnpublish={onUnpublish}
+        />
         <div className="ws-drawer-actions">
           <span className="ws-files-label">Files</span>
           <div className="ws-files-actions">
@@ -1775,13 +1782,6 @@ function FileNavPanel({
             }}
           />
         </div>
-        <PublishDrawerAction
-          publishedUrl={publishedUrl}
-          publishing={publishing}
-          canPublish={canPublish}
-          onPublish={onPublish}
-          onUnpublish={onUnpublish}
-        />
         {!canMutate && (
           <div className="ws-drawer-syncing" role="status">
             Loading your files… add, upload, and delete unlock once they sync.
@@ -1804,7 +1804,7 @@ function FileNavPanel({
             ) : null
           ) : (
             <FileNode
-              node={root.children.get('files') || root}
+              node={(root.children.size === 1 && root.children.has('files')) ? root.children.get('files') : root}
               selectedPath={selectedPath}
               onSelect={(p) => { onSelect(p); onClose() }}
               depth={-1}
@@ -2158,7 +2158,7 @@ const FILE_CACHE_VERSION = 1
 const CHAT_OPEN_VERSION = 1
 const CHAT_RATIO_VERSION = 1
 const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
-const APP_VERSION = '0.10.2'
+const APP_VERSION = '0.10.3'
 
 // The chat pane must never collapse smaller than the embedded composer's input
 // pill — the owner spec is "down to the top of the input pill but not more and
