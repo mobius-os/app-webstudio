@@ -19,6 +19,9 @@ execFileSync(esbuild, [
   '--format=esm',
   '--jsx=automatic',
   '--platform=node',
+  '--alias:@codemirror/state=./tests/runtime-lib-stub.mjs',
+  '--alias:@codemirror/view=./tests/runtime-lib-stub.mjs',
+  '--alias:@codemirror/commands=./tests/runtime-lib-stub.mjs',
   'index.jsx',
   '--outfile=tests/.build/index.mjs',
 ], {
