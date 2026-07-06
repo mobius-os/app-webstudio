@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { signal } from '../analytics.js'
 import { isSafeRelPath } from '../domain.js'
 import {
   anchorActionFor,
@@ -35,6 +36,7 @@ export function HtmlPreview({ storage, entryPath, version }) {
       if (!next.startsWith('build/site/')) return
       if (!isSafeRelPath(next.slice('build/site/'.length))) return
       setPageEntry(next)
+      signal('preview_page_viewed', { via: 'internal-nav' })
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)

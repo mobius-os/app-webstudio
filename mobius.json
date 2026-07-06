@@ -48,6 +48,7 @@
   },
   "source_files": [
     "constants.js",
+    "analytics.js",
     "theme.js",
     "domain.js",
     "storage.js",

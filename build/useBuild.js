@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { signal } from '../analytics.js'
 import { BUILD_POLL_MS, BUILD_TIMEOUT_MS } from '../constants.js'
 import { entryFromBuildStatusForDoc, entryPathForHtmlDoc, isHtmlDoc } from '../domain.js'
 
@@ -20,6 +21,18 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
   // True while THIS instance holds the app-wide dispatch claim (build/
   // dispatch.json) — see build() for why builds are serialized app-wide.
   const claimedRef = useRef(false)
+  // Start time of the in-flight build, for build_completed's duration_ms. Only
+  // a real build() sets it; a restore (rememberEntry) never emits the signal.
+  const buildStartRef = useRef(0)
+
+  // Emit build_completed with the elapsed time — build failures are the most
+  // actionable Web Studio friction, so Reflection tracks status + duration.
+  const signalBuildCompleted = useCallback((status) => {
+    const started = buildStartRef.current
+    buildStartRef.current = 0
+    if (!started) return
+    signal('build_completed', { status, duration_ms: Date.now() - started })
+  }, [])
 
   const releaseClaim = useCallback(() => {
     if (!claimedRef.current) return
@@ -83,6 +96,7 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
     if (generation !== buildGenerationRef.current) return
     if (Date.now() > deadlineRef.current) {
       releaseClaim()
+      signalBuildCompleted('error')
       finishError('Build timed out (over 2 minutes). Try again, or check the '
         + 'files are valid.')
       return
@@ -106,16 +120,18 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
       if (status.status === 'done') {
         const entry = entryFromBuildStatusForDoc(status, doc) || entryPathForHtmlDoc(doc)
         releaseClaim()
+        signalBuildCompleted('done')
         finishDone(doc, entry)
         if (typeof onDone === 'function' && entry) onDone(doc, entry)
         return
       }
       releaseClaim()
+      signalBuildCompleted('error')
       finishError(status.log || 'Build failed.')
       return
     }
     pollRef.current = setTimeout(() => poll(doc, onDone, generation), BUILD_POLL_MS)
-  }, [storage, finishDone, finishError, releaseClaim])
+  }, [storage, finishDone, finishError, releaseClaim, signalBuildCompleted])
 
   // Kick a build for `doc` (a "files/<entry>.html" path). onDone fires once the
   // site is assembled. Guards against concurrent builds + offline.
@@ -149,6 +165,7 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
     }
     clearPoll()
     buildingRef.current = true
+    buildStartRef.current = Date.now()
     const generation = buildGenerationRef.current
     setBuildDoc(doc)
     setBuildStatus('building')
@@ -177,6 +194,8 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
         let detail = ''
         try { detail = (await r.json()).detail || '' } catch { /* non-JSON body */ }
         releaseClaim()
+        signal('error', { message: `run-job → ${r.status}`, source: 'build-start' })
+        signalBuildCompleted('error')
         finishError(
           `Could not start the build (server returned ${r.status}${detail ? `: ${detail}` : ''}).`,
         )
@@ -187,9 +206,11 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
       pollRef.current = setTimeout(() => poll(doc, onDone, generation), BUILD_POLL_MS)
     } catch (e) {
       releaseClaim()
+      signal('error', { message: String((e && e.message) || e), source: 'build-start' })
+      signalBuildCompleted('error')
       finishError((e && e.message) ? e.message : 'Build failed to start.')
     }
-  }, [appId, token, storage, rootStorage, prefix, online, clearPoll, finishError, poll, releaseClaim])
+  }, [appId, token, storage, rootStorage, prefix, online, clearPoll, finishError, poll, releaseClaim, signalBuildCompleted])
 
   const rememberEntry = useCallback((doc, entry) => {
     if (buildingRef.current) return

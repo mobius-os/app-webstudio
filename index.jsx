@@ -14,6 +14,7 @@
 // Only App lives here: it owns top-level project/file/editor/build/chat state,
 // persistence wiring, and mounts the source/preview/file/chat UI.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { signal } from './analytics.js'
 import {
   CHAT_PANE_MIN_PX,
   DEFAULT_PROJECT,
@@ -161,6 +162,8 @@ export default function App({ appId, token }) {
   const clearBuildPoll = build.clearPoll
   const seenBuildStatusRef = useRef('')
   const hydratedProjectRef = useRef(activeProjectId)
+  // Fires app_ready exactly once, after the first real hydration completes.
+  const appReadyRef = useRef(false)
   const readFreshProjects = useCallback(async () => {
     try {
       const stored = await rootStorage.getFresh('projects.json')
@@ -295,7 +298,10 @@ export default function App({ appId, token }) {
     setChatOpen((open) => {
       // Turning on always spawns a 50/50 split — the divider in the middle —
       // regardless of where a previous drag left it (owner spec).
-      if (!open) setChatRatio(0.5)
+      if (!open) {
+        setChatRatio(0.5)
+        signal('chat_opened', {})
+      }
       return !open
     })
   }, [])
@@ -368,6 +374,19 @@ export default function App({ appId, token }) {
   }, [appId, activeProjectId, files, fileCache, selectedPath])
 
   useEffect(() => { filesRef.current = files }, [files])
+
+  // app_ready: emitted once the project list and the file index have both
+  // hydrated, so Reflection can distinguish a real open (and its project/file
+  // scale) from the platform's own iframe-load event.
+  useEffect(() => {
+    if (appReadyRef.current || !projectsLoaded || !indexLoaded) return
+    appReadyRef.current = true
+    signal('app_ready', {
+      item_count: files.length,
+      file_count: files.length,
+      project_count: projects.length,
+    })
+  }, [projectsLoaded, indexLoaded, files.length, projects.length])
 
   const closeNav = useCallback(() => {
     try { navHandleRef.current?.close?.() } catch {}
@@ -611,7 +630,9 @@ export default function App({ appId, token }) {
     setMainPath(path)
     try {
       await storage.setJSON('main.json', { path })
+      signal('item_updated', { type: 'main' })
     } catch (e) {
+      signal('error', { message: String(e.message || e), source: 'save' })
       await modal.alert(e.message || String(e), { title: 'Could not set main page' })
     }
   }, [storage, modal])
@@ -700,6 +721,7 @@ export default function App({ appId, token }) {
         setFileLoading(false)
       }).catch((e) => {
         if (!cancelled) {
+          signal('error', { message: String(e.message || e), source: 'load' })
           setFileError(e.message || 'Could not load file.')
           setFileLoading(false)
           setFileDirty(false)
@@ -734,6 +756,9 @@ export default function App({ appId, token }) {
 
   const onFilesMaybeChanged = useCallback(async () => {
     await syncProjectFromStorage()
+    // The embedded agent finished a turn and we just re-synced the tree/index —
+    // tells Reflection the user+agent creation loop is actually being exercised.
+    signal('agent_files_changed', {})
     const path = selectedPathRef.current
     if (path && online && isTextProjectPath(path)) {
       storage.get(path).catch(() => {})
@@ -802,7 +827,9 @@ export default function App({ appId, token }) {
       setFileCache((prev) => ({ ...prev, [path]: '' }))
       setSelectedPath(path)
       closeNav()
+      signal('item_created', { type: 'file' })
     } catch (e) {
+      signal('error', { message: String(e.message || e), source: 'save' })
       await modal.alert(e.message || String(e), { title: 'Could not create file' })
     }
   }, [storage, modal, closeNav, ensureIndexWritable])
@@ -854,7 +881,9 @@ export default function App({ appId, token }) {
       const next = [...new Set([...base, path])].sort()
       await storage.setJSON('files-index.json', next)
       setFiles(next)
+      signal('item_created', { type: 'folder' })
     } catch (e) {
+      signal('error', { message: String(e.message || e), source: 'save' })
       await modal.alert(e.message || String(e), { title: 'Could not create folder' })
     }
   }, [storage, modal, ensureIndexWritable])
@@ -890,7 +919,9 @@ export default function App({ appId, token }) {
         const nextReal = next.find((p) => !p.endsWith('/.keep'))
         setSelectedPath(nextReal || null)
       }
+      signal('item_deleted', { type: 'file' })
     } catch (e) {
+      signal('error', { message: String(e.message || e), source: 'delete' })
       await modal.alert(e.message || String(e), { title: 'Could not delete' })
     }
   }, [selectedPath, storage, modal, ensureIndexWritable, build])
@@ -958,7 +989,9 @@ export default function App({ appId, token }) {
         const next = [...new Set([...base, ...added])].sort()
         await storage.setJSON('files-index.json', next)
         setFiles(next)
+        signal('item_created', { type: 'upload' })
       } catch (e) {
+        signal('error', { message: String(e.message || e), source: 'upload' })
         await modal.alert(e.message || String(e), { title: 'Upload saved but index update failed' })
       }
     }
@@ -1012,6 +1045,7 @@ export default function App({ appId, token }) {
         }
       }
     } catch (e) {
+      signal('error', { message: String(e.message || e), source: 'move' })
       if (e.status === 409) {
         await modal.alert('Something already exists at the destination.', { title: 'Move failed' })
       } else {
@@ -1071,7 +1105,9 @@ export default function App({ appId, token }) {
         return cur
       })
       build.forgetUnder(folderPath)
+      signal('item_deleted', { type: 'folder' })
     } catch (e) {
+      signal('error', { message: String(e.message || e), source: 'delete' })
       await modal.alert(e.message || String(e), { title: 'Delete failed' })
     }
   }, [storage, modal, ensureIndexWritable, build])
@@ -1097,7 +1133,10 @@ export default function App({ appId, token }) {
 
   // When the MAIN page's build finishes, flip the viewer to Preview.
   const onBuildDone = useCallback(async (doc) => {
-    if (doc === mainPathRef.current) setViewMode('preview')
+    if (doc === mainPathRef.current) {
+      setViewMode('preview')
+      signal('preview_page_viewed', { via: 'build' })
+    }
     // The built site lives under build/site/, NOT files/, so it is deliberately
     // NOT added to the file tree — the tree shows source, the Preview shows the
     // assembled output. (LaTeX added the .pdf to the tree; a website's build is
@@ -1127,7 +1166,9 @@ export default function App({ appId, token }) {
         if (selectedPathRef.current !== path) return
         setFileCache((prev) => ({ ...prev, [path]: body }))
         if (fileContentRef.current === body) setFileDirty(false)
+        signal('item_updated', { type: 'file' })
       }).catch((e) => {
+        signal('error', { message: String(e.message || e), source: 'save' })
         if (selectedPathRef.current === path) {
           setFileError(e.message || 'Could not save file.')
         }
@@ -1158,6 +1199,7 @@ export default function App({ appId, token }) {
         setFileDirty(false)
         setFileCache((prev) => ({ ...prev, [selectedPath]: fileContent }))
       } catch (e) {
+        signal('error', { message: String(e.message || e), source: 'save' })
         setFileError(e.message || 'Could not save file.')
       } finally {
         setFileSaving(false)
@@ -1204,6 +1246,7 @@ export default function App({ appId, token }) {
     setFileDirty(false)
     setFileSaving(false)
     setSelectedPath(path)
+    if (path) signal('item_opened', { type: 'file' })
   }, [flushDirtyEdits])
 
   const resetFileUi = useCallback(() => {
@@ -1258,7 +1301,9 @@ export default function App({ appId, token }) {
       const next = fresh.map((p) => (p.id === targetId ? { ...p, name: clean } : p))
       await rootStorage.setJSON('projects.json', next)
       setProjects(next)
+      signal('item_updated', { type: 'project' })
     } catch (e) {
+      signal('error', { message: String(e.message || e), source: 'save' })
       await modal.alert(e.message || String(e), { title: 'Could not rename project' })
     } finally {
       setRenamingId(null)
@@ -1281,6 +1326,7 @@ export default function App({ appId, token }) {
       const next = [...fresh, { id, name, createdAt: Date.now() }]
       await rootStorage.setJSON('projects.json', next)
       setProjects(next)
+      signal('item_created', { type: 'project' })
       await switchProject(id)
       // switchProject early-returns (without making `id` active) if the user
       // tapped Publish during the await window. Only open the inline rename if
@@ -1291,6 +1337,7 @@ export default function App({ appId, token }) {
         openNavRef.current?.()
       }
     } catch (e) {
+      signal('error', { message: String(e.message || e), source: 'save' })
       await modal.alert(e.message || String(e), { title: 'Could not create project' })
     }
   }, [modal, projects.length, projectsLoaded, readFreshProjects, rootStorage, switchProject])
@@ -1339,6 +1386,7 @@ export default function App({ appId, token }) {
       await deleteStorageTree(rootStorage, projectPrefix(targetId))
       await rootStorage.setJSON('projects.json', next)
       setProjects(next)
+      signal('item_deleted', { type: 'project' })
       removeFileCache(appId, targetId)
       if (targetId === activeProjectId) {
         resetFileUi()
@@ -1346,6 +1394,7 @@ export default function App({ appId, token }) {
         setActiveProjectId(fallback)
       }
     } catch (e) {
+      signal('error', { message: String(e.message || e), source: 'delete' })
       await modal.alert(e.message || String(e), { title: 'Could not delete project' })
     }
   }, [
@@ -1379,6 +1428,7 @@ export default function App({ appId, token }) {
         const fullUrl = new URL(data.url, window.location.origin).href
         setPublishedUrl(fullUrl)
         publishEpochRef.current += 1
+        signal('site_published', {})
         try { await storage.setText('publish-url.txt', fullUrl) } catch { /* best-effort persist */ }
         // No blocking modal — opening one rides the shell nav stack and closes
         // the drawer. The drawer's publish row now shows the URL + Copy/Open/
@@ -1396,6 +1446,7 @@ export default function App({ appId, token }) {
       } catch { /* non-JSON */ }
       await modal.alert(detail || `Publish failed (${r.status}).`, { title: 'Publish failed' })
     } catch (e) {
+      signal('error', { message: String(e.message || e), source: 'publish' })
       await modal.alert(e.message || String(e), { title: 'Publish failed' })
     } finally {
       publishingRef.current = false
@@ -1416,6 +1467,7 @@ export default function App({ appId, token }) {
       if (r.ok) {
         setPublishedUrl(null)
         publishEpochRef.current += 1
+        signal('site_unpublished', {})
         try { await storage.remove('publish-url.txt') } catch { /* best-effort clear */ }
         return
       }
@@ -1426,6 +1478,7 @@ export default function App({ appId, token }) {
       } catch { /* non-JSON */ }
       await modal.alert(detail || `Unpublish failed (${r.status}).`, { title: 'Unpublish failed' })
     } catch (e) {
+      signal('error', { message: String(e.message || e), source: 'publish' })
       await modal.alert(e.message || String(e), { title: 'Unpublish failed' })
     } finally {
       publishingRef.current = false
