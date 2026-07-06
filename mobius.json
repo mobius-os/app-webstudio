@@ -9,6 +9,11 @@
   "entry": "index.jsx",
   "icon": "icon.png",
   "offline_capable": false,
+  "offline": {
+    "reads": true,
+    "writes": "queued",
+    "execution": "none"
+  },
   "embeds_agent": true,
   "permissions": {
     "cross_app_access": "none",
