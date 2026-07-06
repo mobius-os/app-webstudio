@@ -1,10 +1,9 @@
-export function SyncPill({ online, pending, hasRuntime }) {
-  if (!hasRuntime) return null
-  if (online && pending === 0) return null
-  const label = !online
-    ? (pending > 0 ? `Offline · ${pending} pending` : 'Offline')
-    : null
-  if (!label) return null
+// Sync status is SILENT WHEN HEALTHY: window.mobius.storage queues writes
+// safely, so "saving" and pending-write counters are invisible plumbing, not
+// information — the pill renders NOTHING while online. When offline it shows a
+// plain "Offline" (no counts, no timestamps), the one thing the owner needs.
+export function SyncPill({ online }) {
+  if (online) return null
   return (
     <div
       className="ws-sync-pill ws-sync-pill--offline"
@@ -13,7 +12,7 @@ export function SyncPill({ online, pending, hasRuntime }) {
       title="Changes save locally and sync when you're back online."
     >
       <span className="ws-sync-pill-dot" aria-hidden="true" />
-      {label}
+      Offline
     </div>
   )
 }

@@ -40,15 +40,26 @@ export function isTextProjectPath(path) {
     && !isBinaryProjectPath(path)
 }
 
-// `.json` paths under the project (files-index.json, main.json, chat_id.json,
-// and any .json the user makes) are MANAGED files: every other reader loads
-// them with the typed JSON getter, which throws assertReadKind if they were
-// written as text/plain. The text editor's debounced autosave writes
-// text/plain, so editing a .json as source would corrupt it for every other
-// reader. We make .json paths read-only in the editor instead — shown as
-// source, but never autosaved back as text.
+// The app's OWN metadata files are stored as typed JSON (envelope-free): every
+// reader loads them with the JSON getter, which throws assertReadKind if they
+// were written as text/plain. Everything the USER creates lives under files/
+// and is editable text-or-binary — a user's files/data.json is SOURCE, not
+// typed JSON, so it round-trips through getText/setText like any other source
+// file and is freely editable. This predicate marks ONLY the app's own
+// metadata, so the editor leaves those read-only and the storage layer routes
+// them through the JSON getter; a user .json is neither. It matches on the name
+// after stripping an optional projects/<id>/ scope prefix, so the storage layer
+// (root-prefixed paths) and the editor (scoped paths) agree on the kind.
+const MANAGED_JSON_NAMES = new Set([
+  'files-index.json',
+  'main.json',
+  'chat_id.json',
+  'build/status.json',
+  'build/dispatch.json',
+])
 export function isManagedJsonPath(path) {
-  return String(path || '').toLowerCase().endsWith('.json')
+  const rel = String(path || '').replace(/^projects\/[A-Za-z0-9_-]+\//, '')
+  return MANAGED_JSON_NAMES.has(rel)
 }
 
 // Is `path` an HTML entry the user could build? The Web Studio equivalent of

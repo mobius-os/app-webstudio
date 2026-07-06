@@ -15,7 +15,6 @@
 // persistence wiring, and mounts the source/preview/file/chat UI.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  APP_VERSION,
   CHAT_PANE_MIN_PX,
   DEFAULT_PROJECT,
   PROJECT_SYNC_MS,
@@ -138,7 +137,6 @@ export default function App({ appId, token }) {
   useEffect(() => { fileContentRef.current = fileContent }, [fileContent])
   useEffect(() => { fileDirtyRef.current = fileDirty }, [fileDirty])
   useEffect(() => { fileSavingRef.current = fileSaving }, [fileSaving])
-  const [pending, setPending] = useState(0)
   const [chatOpen, setChatOpen] = useState(() => readChatOpen(appId))
   const [chatRatio, setChatRatio] = useState(() => readChatRatio(appId))
   const [publishedUrl, setPublishedUrl] = useState(null)
@@ -218,9 +216,12 @@ export default function App({ appId, token }) {
 
   useEffect(() => {
     clearBuildPoll()
-    const switchingProject = hydratedProjectRef.current !== activeProjectId
     hydratedProjectRef.current = activeProjectId
-    const snapshot = switchingProject ? null : readFileCache(appId, activeProjectId)
+    // Read the DESTINATION project's own localStorage cache (keyed by the new
+    // activeProjectId) so a project switch paints its cached tree immediately —
+    // forcing this to null blanked the tree until refreshFiles landed, which
+    // shows nothing at all offline (list() has no offline mirror).
+    const snapshot = readFileCache(appId, activeProjectId)
     const nextFiles = snapshot?.index || []
     filesRef.current = nextFiles
     selectedPathRef.current = snapshot?.lastPath || null
@@ -367,24 +368,6 @@ export default function App({ appId, token }) {
   }, [appId, activeProjectId, files, fileCache, selectedPath])
 
   useEffect(() => { filesRef.current = files }, [files])
-
-  const refreshPending = useCallback(async () => {
-    try {
-      const n = await storage.pendingCount()
-      setPending(n)
-    } catch {
-      // Leave the previous count alone on transient errors.
-    }
-  }, [storage])
-
-  useEffect(() => {
-    refreshPending()
-    const id = setInterval(refreshPending, 10000)
-    return () => clearInterval(id)
-  }, [refreshPending])
-  useEffect(() => {
-    refreshPending()
-  }, [online, refreshPending])
 
   const closeNav = useCallback(() => {
     try { navHandleRef.current?.close?.() } catch {}
@@ -628,11 +611,10 @@ export default function App({ appId, token }) {
     setMainPath(path)
     try {
       await storage.setJSON('main.json', { path })
-      refreshPending()
     } catch (e) {
       await modal.alert(e.message || String(e), { title: 'Could not set main page' })
     }
-  }, [storage, refreshPending, modal])
+  }, [storage, modal])
 
   // Load the selected file's content. Cache-first for first paint, then
   // stale-while-revalidate while online.
@@ -820,11 +802,10 @@ export default function App({ appId, token }) {
       setFileCache((prev) => ({ ...prev, [path]: '' }))
       setSelectedPath(path)
       closeNav()
-      refreshPending()
     } catch (e) {
       await modal.alert(e.message || String(e), { title: 'Could not create file' })
     }
-  }, [storage, modal, closeNav, refreshPending, ensureIndexWritable])
+  }, [storage, modal, closeNav, ensureIndexWritable])
 
   const handleCreateFolder = useCallback(async () => {
     if (!(await ensureIndexWritable())) return
@@ -873,11 +854,10 @@ export default function App({ appId, token }) {
       const next = [...new Set([...base, path])].sort()
       await storage.setJSON('files-index.json', next)
       setFiles(next)
-      refreshPending()
     } catch (e) {
       await modal.alert(e.message || String(e), { title: 'Could not create folder' })
     }
-  }, [storage, modal, refreshPending, ensureIndexWritable])
+  }, [storage, modal, ensureIndexWritable])
 
   const handleDeleteFile = useCallback(async (path) => {
     if (!(await ensureIndexWritable())) return
@@ -910,11 +890,10 @@ export default function App({ appId, token }) {
         const nextReal = next.find((p) => !p.endsWith('/.keep'))
         setSelectedPath(nextReal || null)
       }
-      refreshPending()
     } catch (e) {
       await modal.alert(e.message || String(e), { title: 'Could not delete' })
     }
-  }, [selectedPath, storage, modal, refreshPending, ensureIndexWritable, build])
+  }, [selectedPath, storage, modal, ensureIndexWritable, build])
 
   // ---- Upload (files + whole folders) ------------------------------------
   const uploadFiles = useCallback(async (fileList, { asFolder } = {}) => {
@@ -982,7 +961,6 @@ export default function App({ appId, token }) {
       } catch (e) {
         await modal.alert(e.message || String(e), { title: 'Upload saved but index update failed' })
       }
-      refreshPending()
     }
     if (failed.length) {
       await modal.alert(
@@ -991,7 +969,7 @@ export default function App({ appId, token }) {
         { title: 'Some uploads failed' },
       )
     }
-  }, [storage, modal, refreshPending, ensureIndexWritable])
+  }, [storage, modal, ensureIndexWritable])
 
   // ---- Move / rename (drag-to-move + context-menu rename) ----------------
   const movePath = useCallback(async (from, to) => {
@@ -1033,7 +1011,6 @@ export default function App({ appId, token }) {
           storage.setJSON('main.json', { path: nextMain }).catch(() => {})
         }
       }
-      refreshPending()
     } catch (e) {
       if (e.status === 409) {
         await modal.alert('Something already exists at the destination.', { title: 'Move failed' })
@@ -1041,7 +1018,7 @@ export default function App({ appId, token }) {
         await modal.alert(e.message || String(e), { title: 'Move failed' })
       }
     }
-  }, [storage, modal, refreshPending, ensureIndexWritable, build])
+  }, [storage, modal, ensureIndexWritable, build])
 
   const handleRename = useCallback(async (path) => {
     const parts = path.split('/')
@@ -1094,11 +1071,10 @@ export default function App({ appId, token }) {
         return cur
       })
       build.forgetUnder(folderPath)
-      refreshPending()
     } catch (e) {
       await modal.alert(e.message || String(e), { title: 'Delete failed' })
     }
-  }, [storage, modal, refreshPending, ensureIndexWritable, build])
+  }, [storage, modal, ensureIndexWritable, build])
 
   const selectedExt = selectedPath ? extensionFor(selectedPath) : ''
   const selectedIsBinary = selectedPath ? isBinaryProjectPath(selectedPath) : false
@@ -1151,7 +1127,6 @@ export default function App({ appId, token }) {
         if (selectedPathRef.current !== path) return
         setFileCache((prev) => ({ ...prev, [path]: body }))
         if (fileContentRef.current === body) setFileDirty(false)
-        refreshPending()
       }).catch((e) => {
         if (selectedPathRef.current === path) {
           setFileError(e.message || 'Could not save file.')
@@ -1169,7 +1144,6 @@ export default function App({ appId, token }) {
     fileDirty,
     fileContent,
     storage,
-    refreshPending,
   ])
 
   const handleSaveFile = useCallback(async () => {
@@ -1183,7 +1157,6 @@ export default function App({ appId, token }) {
         await storage.setText(selectedPath, fileContent)
         setFileDirty(false)
         setFileCache((prev) => ({ ...prev, [selectedPath]: fileContent }))
-        refreshPending()
       } catch (e) {
         setFileError(e.message || 'Could not save file.')
       } finally {
@@ -1193,7 +1166,7 @@ export default function App({ appId, token }) {
     })()
     savePromiseRef.current = p
     return p
-  }, [selectedPath, selectedIsBinary, fileSaving, storage, fileContent, refreshPending])
+  }, [selectedPath, selectedIsBinary, fileSaving, storage, fileContent])
 
   // Persist the editor's LATEST text before a reset (project switch/create)
   // throws away the dirty buffer. A debounced autosave may have a write in
@@ -1214,6 +1187,24 @@ export default function App({ appId, token }) {
       setFileDirty(false)
     }
   }, [canEditSelected, selectedIsBinary, storage])
+
+  // Switch the open file, closing the dirty-file-switch data-loss path: picking
+  // file B while A's 700ms autosave is still armed used to leave fileDirty=true,
+  // which both BLOCKED B's load (readLatest bails while dirty) and let the
+  // pending timer fire storage.setText(B, A's-buffer) — writing A's edits into
+  // B. We flush A first (awaiting any in-flight autosave), then reset the
+  // dirty/saving flags SYNCHRONOUSLY for the new path so neither the load effect
+  // nor the autosave timer can act on A's stale buffer under B's path. The
+  // timer's own selectedPath guard stays as the second line of defense.
+  const switchFile = useCallback(async (path) => {
+    if (path === selectedPathRef.current) return
+    await flushDirtyEdits()
+    fileDirtyRef.current = false
+    fileSavingRef.current = false
+    setFileDirty(false)
+    setFileSaving(false)
+    setSelectedPath(path)
+  }, [flushDirtyEdits])
 
   const resetFileUi = useCallback(() => {
     clearBuildPoll()
@@ -1367,27 +1358,6 @@ export default function App({ appId, token }) {
     rootStorage,
     token,
   ])
-
-  const showPublishedModal = useCallback(async (fullUrl) => {
-    await modal.alert(
-      <div>
-        <div className="ws-publish-url">{fullUrl}</div>
-        <div className="ws-publish-actions">
-          <button
-            type="button"
-            className="ws-modal-btn ws-modal-btn--secondary"
-            onClick={() => navigator.clipboard?.writeText(fullUrl).catch(() => {})}
-          >
-            Copy
-          </button>
-          <a className="ws-modal-btn ws-modal-btn--primary ws-publish-link" href={fullUrl} target="_blank" rel="noopener noreferrer">
-            Open
-          </a>
-        </div>
-      </div>,
-      { title: 'Published' },
-    )
-  }, [modal])
 
   const handlePublish = useCallback(async () => {
     if (publishingRef.current) return
@@ -1704,7 +1674,7 @@ export default function App({ appId, token }) {
           onClose={closeNav}
           files={files}
           selectedPath={selectedPath}
-          onSelect={setSelectedPath}
+          onSelect={switchFile}
           canMutate={indexLoaded}
           onCreateFile={handleCreateFile}
           onCreateFolder={handleCreateFolder}
@@ -1769,6 +1739,8 @@ export default function App({ appId, token }) {
           </>
         )}
       </div>
+      {/* Silent when healthy — appears only offline with a plain "Offline". */}
+      <SyncPill online={online} />
       {modal.node}
     </div>
   )

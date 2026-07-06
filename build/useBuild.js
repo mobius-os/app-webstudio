@@ -17,6 +17,18 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
   const buildSeqRef = useRef(0)
   const buildGenerationRef = useRef(0)
   const buildingRef = useRef(false)
+  // True while THIS instance holds the app-wide dispatch claim (build/
+  // dispatch.json) — see build() for why builds are serialized app-wide.
+  const claimedRef = useRef(false)
+
+  const releaseClaim = useCallback(() => {
+    if (!claimedRef.current) return
+    claimedRef.current = false
+    // Best-effort: drop our dispatch claim the moment the build settles so a
+    // legitimate next build (here or on another device) isn't blocked for the
+    // full timeout window waiting for the claim to age out.
+    rootStorage.remove('build/dispatch.json').catch(() => {})
+  }, [rootStorage])
 
   const clearPoll = useCallback(() => {
     buildGenerationRef.current += 1
@@ -35,12 +47,13 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
 
   useEffect(() => {
     clearPoll()
+    releaseClaim()
     buildingRef.current = false
     setBuildStatus('idle')
     setBuildLog('')
     setBuildDoc(null)
     setEntryByDoc({})
-  }, [prefix, clearPoll])
+  }, [prefix, clearPoll, releaseClaim])
 
   const finishDone = useCallback((doc, entry) => {
     clearPoll()
@@ -69,6 +82,7 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
   const poll = useCallback(async (doc, onDone, generation) => {
     if (generation !== buildGenerationRef.current) return
     if (Date.now() > deadlineRef.current) {
+      releaseClaim()
       finishError('Build timed out (over 2 minutes). Try again, or check the '
         + 'files are valid.')
       return
@@ -91,15 +105,17 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
       }
       if (status.status === 'done') {
         const entry = entryFromBuildStatusForDoc(status, doc) || entryPathForHtmlDoc(doc)
+        releaseClaim()
         finishDone(doc, entry)
         if (typeof onDone === 'function' && entry) onDone(doc, entry)
         return
       }
+      releaseClaim()
       finishError(status.log || 'Build failed.')
       return
     }
     pollRef.current = setTimeout(() => poll(doc, onDone, generation), BUILD_POLL_MS)
-  }, [storage, finishDone, finishError])
+  }, [storage, finishDone, finishError, releaseClaim])
 
   // Kick a build for `doc` (a "files/<entry>.html" path). onDone fires once the
   // site is assembled. Guards against concurrent builds + offline.
@@ -109,6 +125,27 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
     if (!online) {
       finishError('You are offline. Building needs a connection — reconnect and try again.')
       return
+    }
+    const myTarget = `${prefix || ''}${doc}`
+    // Serialize builds app-wide. /run-job carries no project context, so
+    // build.sh reads a single shared ROOT build/target.txt; two near-
+    // simultaneous builds (another tab/device) would race on it — both could
+    // build the later target while the first poller waits for a verdict that
+    // never lands and then times out. A root dispatch claim lets a second build
+    // SEE that one is in flight and refuse cleanly rather than race into a
+    // silent timeout. Best-effort: a genuine same-instant double-write still
+    // races; a fully race-free fix needs per-project dispatch through the
+    // run-job API, which is a backend change out of this app's scope.
+    try {
+      const claim = await rootStorage.get('build/dispatch.json')
+      if (claim && typeof claim === 'object' && claim.target && claim.target !== myTarget
+          && Number.isFinite(claim.at) && Date.now() - claim.at < BUILD_TIMEOUT_MS) {
+        finishError('Another page is building right now (possibly on another '
+          + 'device). Wait for it to finish, then Build again.')
+        return
+      }
+    } catch {
+      // Couldn't read the claim — proceed rather than block a legitimate build.
     }
     clearPoll()
     buildingRef.current = true
@@ -126,7 +163,11 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
       // root dispatch target that can point at either the legacy root project
       // or a projects/<id>/ subtree. The actual per-project target above is
       // still the durable storage key used by the app.
-      await rootStorage.setText('build/target.txt', `${prefix || ''}${doc}`)
+      await rootStorage.setText('build/target.txt', myTarget)
+      // 1c. Claim the dispatch (timestamped) so a concurrent build refuses
+      // instead of racing on the shared root target above.
+      claimedRef.current = true
+      await rootStorage.setJSON('build/dispatch.json', { target: myTarget, at: Date.now() })
       // 2. Kick the server-side job. 202 = accepted; anything else is fatal.
       const r = await fetch(`/api/apps/${appId}/run-job`, {
         method: 'POST',
@@ -135,6 +176,7 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
       if (r.status !== 202) {
         let detail = ''
         try { detail = (await r.json()).detail || '' } catch { /* non-JSON body */ }
+        releaseClaim()
         finishError(
           `Could not start the build (server returned ${r.status}${detail ? `: ${detail}` : ''}).`,
         )
@@ -144,9 +186,10 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
       deadlineRef.current = Date.now() + BUILD_TIMEOUT_MS
       pollRef.current = setTimeout(() => poll(doc, onDone, generation), BUILD_POLL_MS)
     } catch (e) {
+      releaseClaim()
       finishError((e && e.message) ? e.message : 'Build failed to start.')
     }
-  }, [appId, token, storage, rootStorage, prefix, online, clearPoll, finishError, poll])
+  }, [appId, token, storage, rootStorage, prefix, online, clearPoll, finishError, poll, releaseClaim])
 
   const rememberEntry = useCallback((doc, entry) => {
     if (buildingRef.current) return
@@ -167,14 +210,19 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
     }, []),
     rewriteDocs: useCallback((rewrite) => {
       setEntryByDoc((prev) => {
+        let changed = false
         const next = {}
         for (const [doc, rec] of Object.entries(prev)) {
-          // The doc key follows the rename; the built entry lives under
-          // build/site/ keyed by the source-relative path, so it also moves.
-          const movedEntry = `build/site/${rewrite(doc).slice('files/'.length)}`
-          next[rewrite(doc)] = { ...rec, entry: movedEntry }
+          const nextDoc = rewrite(doc)
+          // An UNCHANGED doc keeps its built entry. A renamed/moved doc's built
+          // output still sits at the OLD build/site path — the source moved but
+          // no rebuild ran — so remapping the key to build/site/<new> would
+          // point the preview at a file that does not exist. Drop the entry
+          // instead so the preview asks for a fresh Build, not a phantom fetch.
+          if (nextDoc === doc) next[doc] = rec
+          else changed = true
         }
-        return next
+        return changed ? next : prev
       })
     }, []),
     forgetUnder: useCallback((prefix) => {

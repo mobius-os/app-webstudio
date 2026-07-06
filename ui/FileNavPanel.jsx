@@ -235,7 +235,11 @@ export function FileNavPanel({
           <div className="ws-files-actions">
             <button className="ws-icon-btn" onClick={onCreateFile} disabled={!canMutate} title="New file" aria-label="New file"><NewFileIcon size={17} /></button>
             <button className="ws-icon-btn" onClick={onCreateFolder} disabled={!canMutate} title="New folder" aria-label="New folder"><NewFolderIcon size={17} /></button>
-            <button className="ws-icon-btn" onClick={() => fileInputRef.current && fileInputRef.current.click()} disabled={!canMutate} title="Upload" aria-label="Upload"><UploadIcon size={17} /></button>
+            <button className="ws-icon-btn" onClick={() => fileInputRef.current && fileInputRef.current.click()} disabled={!canMutate} title="Upload files" aria-label="Upload files"><UploadIcon size={17} /></button>
+            {/* Upload folder: the only trigger for folderInputRef (webkitdirectory).
+                Without it the folder-upload input below was unreachable dead code.
+                A trailing "/" marks it as the folder variant of Upload. */}
+            <button className="ws-icon-btn ws-icon-btn--folder-up" onClick={() => folderInputRef.current && folderInputRef.current.click()} disabled={!canMutate} title="Upload folder" aria-label="Upload folder"><UploadIcon size={17} /><span aria-hidden="true">/</span></button>
           </div>
           {/* Hidden file/folder pickers. Materialise the FileList into a real
               array SYNCHRONOUSLY before resetting input.value: onUpload is async

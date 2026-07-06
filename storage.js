@@ -7,6 +7,7 @@ import {
 } from './constants.js'
 import {
   cleanIndexPaths,
+  isManagedJsonPath,
   isSafeProjectId,
   normalizeFileCacheSnapshot,
   prefixedPath,
@@ -16,12 +17,14 @@ export function makeStorage(appId, token) {
   const ms = (typeof window !== 'undefined' && window.mobius && window.mobius.storage) || null
   const hasRuntime = !!ms
   async function get(path) {
-    // Read with the TYPED getter matching how the path was written: .json
-    // paths hold JSON (get); everything else (.html, build/target.txt) is raw
-    // text (getText). Mixing them throws assertReadKind in the runtime, so the
-    // read kind MUST mirror the write kind (setText/setJSON below).
+    // Read with the TYPED getter matching how the path was written: only the
+    // app's OWN metadata (isManagedJsonPath — files-index/main/chat_id/build)
+    // holds typed JSON (get); everything else, including a user's editable
+    // files/*.json source, is raw text (getText). Keying on the extension alone
+    // routed user .json through the JSON getter while it was written as text,
+    // an assertReadKind wrong-kind read that made those files uneditable.
     if (ms) {
-      const isJson = path.endsWith('.json')
+      const isJson = isManagedJsonPath(path)
       if (isJson && typeof ms.get === 'function') return ms.get(path)
       if (!isJson && typeof ms.getText === 'function') return ms.getText(path)
     }
@@ -206,17 +209,38 @@ export function scopedStorage(storage, prefix) {
 // can't carry an Authorization header.
 
 export function useOnline() {
-  const [online, setOnline] = useState(() =>
-    typeof navigator === 'undefined' ? true : navigator.onLine !== false,
-  )
+  const [online, setOnline] = useState(() => {
+    const m = typeof window !== 'undefined' ? window.mobius : null
+    // Prefer the Mobius runtime's own connectivity view for the first paint —
+    // it gates reads, builds, and the offline pill — falling back to the
+    // browser's navigator.onLine when the runtime isn't present.
+    if (m && typeof m.online === 'boolean') return m.online
+    return typeof navigator === 'undefined' ? true : navigator.onLine !== false
+  })
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    const sync = () => setOnline(navigator.onLine !== false)
+    if (typeof window === 'undefined') return undefined
+    const m = window.mobius
+    // Subscribe to the runtime's connectivity change hook when it exists (a
+    // future runtime may expose one); today window.mobius.online is a getter
+    // over navigator.onLine with no change event, so the browser online/offline
+    // events remain the live signal and the reliable fallback.
+    let unsub = null
+    if (m && typeof m.onOnlineChange === 'function') {
+      try {
+        unsub = m.onOnlineChange((v) => setOnline(
+          typeof v === 'boolean' ? v : navigator.onLine !== false,
+        ))
+      } catch { unsub = null }
+    }
+    const sync = () => setOnline(
+      m && typeof m.online === 'boolean' ? m.online : navigator.onLine !== false,
+    )
     window.addEventListener('online', sync)
     window.addEventListener('offline', sync)
     return () => {
       window.removeEventListener('online', sync)
       window.removeEventListener('offline', sync)
+      try { unsub?.() } catch { /* ignore */ }
     }
   }, [])
   return online

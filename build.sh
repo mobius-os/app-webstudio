@@ -111,6 +111,11 @@ if [ -f "$SITE/package.json" ] && command -v npm >/dev/null 2>&1; then
     NPM_LOG="$( (cd "$SITE" && npm install --no-audit --no-fund && npm run build) 2>&1 || echo "npm build skipped/failed (static copy still served)")"
   fi
 fi
+# npm install populated build/site/node_modules — dev dependencies that must
+# never ship to the published/previewed site (megabytes of tooling, and a
+# node_modules dir served as static content). The site's build output lives
+# outside node_modules, so prune it before writing the verdict.
+rm -rf "$SITE/node_modules"
 
 # Success. The entry is the main page inside the assembled site; the app fetches
 # it (and inlines its same-build assets) to render the in-app preview.

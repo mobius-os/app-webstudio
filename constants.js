@@ -9,7 +9,6 @@ export const FILE_CACHE_VERSION = 1
 export const CHAT_OPEN_VERSION = 1
 export const CHAT_RATIO_VERSION = 1
 export const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
-export const APP_VERSION = '0.12.3'
 export const CHAT_PILL_MIN_PX = 64
 export const CHAT_DIVIDER_PX = 10
 export const CHAT_PANE_MIN_PX = CHAT_PILL_MIN_PX + CHAT_DIVIDER_PX

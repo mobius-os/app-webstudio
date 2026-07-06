@@ -16,8 +16,14 @@ export function ModalView({ state }) {
   const titleId = useMemo(() => `ws-modal-title-${wsModalTitleSeq++}`, [])
 
   function cancel() {
+    // Escape / scrim / shell-back must resolve the SAME back-value the Cancel
+    // button and useModal's own back-value use for each kind: undefined for
+    // alert, null for prompt AND choose (a dismissed choose picked nothing),
+    // false only for confirm. Collapsing choose into the confirm branch made
+    // Escape resolve false while Cancel resolved null — an inconsistent verdict.
     if (state.kind === 'alert') state.resolve()
-    else state.resolve(state.kind === 'prompt' ? null : false)
+    else if (state.kind === 'prompt' || state.kind === 'choose') state.resolve(null)
+    else state.resolve(false)
   }
 
   // A custom dialog has to carry its own focus contract — role="dialog" alone
