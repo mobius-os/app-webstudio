@@ -1,0 +1,15 @@
+{
+  "name": "app-webstudio",
+  "version": "0.12.4",
+  "private": true,
+  "description": "Web Studio — Mobius catalog app. Dev tooling only; the app itself ships via mobius.json source_files.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "smoke": "esbuild index.jsx --bundle --packages=external --format=esm --loader:.js=jsx --outfile=/dev/null"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "react": "^19.2.0"
+  }
+}

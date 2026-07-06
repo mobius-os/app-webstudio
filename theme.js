@@ -12,8 +12,8 @@ export const CSS = `
   --ws-scrim: rgba(0, 0, 0, 0.45);
   --ws-scrim-soft: rgba(0, 0, 0, 0.35);
   --ws-shadow: rgba(0, 0, 0, 0.3);
-  background: var(--bg, #111614);
-  color: var(--text, #eef7f1);
+  background: var(--bg);
+  color: var(--text);
   font-family: var(--font, Inter, ui-sans-serif, system-ui, sans-serif);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -196,12 +196,12 @@ export const CSS = `
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--bg);
 }
 .ws-seg-btn {
   width: 44px;
-  height: 40px;
+  height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -209,7 +209,7 @@ export const CSS = `
      outer border. Slightly tighter radius than the wrapper so the active
      fill nests cleanly inside the 2px track. */
   border: none;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -350,7 +350,7 @@ export const CSS = `
   display: block;
   max-width: 100%;
   margin: 18px auto;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 /* ---- html preview (in-app browser) ----
@@ -444,7 +444,7 @@ export const CSS = `
 }
 .ws-project-trigger {
   max-width: 170px;
-  min-height: 36px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -477,13 +477,15 @@ export const CSS = `
 }
 .ws-project-rename-input {
   max-width: 170px;
-  min-height: 36px;
+  min-height: 44px;
   padding: 6px 9px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
   color: var(--text);
-  font: 650 12px/1.2 var(--font);
+  /* 16px so focusing this editable input never triggers iOS zoom-on-focus
+     (a <16px font-size does), matching the 16px modal input. */
+  font: 650 16px/1.2 var(--font);
   outline: none;
 }
 .ws-project-rename-input:focus {
@@ -585,9 +587,9 @@ export const CSS = `
 .ws-drawer-publish-btn {
   flex: 1 1 0;
   min-width: 0;
-  min-height: 40px;
+  min-height: 44px;
   padding: 7px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
@@ -617,7 +619,7 @@ export const CSS = `
 .ws-drawer-publish-url {
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg);
   color: var(--muted);
   font: 12px/1.45 var(--mono);
@@ -627,7 +629,7 @@ export const CSS = `
   flex: 1 1 0;
   min-height: 44px;
   padding: 7px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
@@ -640,16 +642,27 @@ export const CSS = `
 .ws-drawer-btn:active { background: var(--surface2, var(--surface)); }
 .ws-drawer-btn:disabled { opacity: 0.45; cursor: default; }
 .ws-icon-btn {
+  position: relative;
   display: inline-flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; padding: 0;
-  border-radius: 7px; border: 1px solid transparent;
+  width: 44px; height: 44px; padding: 0;
+  border-radius: 8px; border: 1px solid transparent;
   background: transparent; color: var(--muted);
   cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+/* Folder-upload variant: a small "/" superscript distinguishes it from the
+   plain (file) Upload button that sits beside it. */
+.ws-icon-btn--folder-up > span {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 .ws-icon-btn:hover { background: var(--surface2, var(--surface)); color: var(--text); }
 .ws-icon-btn:active:not(:disabled) { background: var(--surface3, var(--surface2)); transform: scale(0.94); }
 .ws-icon-btn:disabled { opacity: 0.3; cursor: default; }
-.ws-icon-btn--danger:hover { color: var(--danger, #f87171); }
+.ws-icon-btn--danger:hover { color: var(--danger); }
 .ws-project-row {
   display: flex; align-items: center; gap: 4px;
   padding: 7px 8px 7px 10px;
@@ -816,10 +829,11 @@ export const CSS = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  /* Full row-height hit target (the visible dot stays 7px). */
+  width: 40px;
+  min-height: 44px;
   border: none;
-  border-radius: 7px;
+  border-radius: 8px;
   background: none;
   color: var(--muted);
   opacity: 0.55;
@@ -971,8 +985,11 @@ export const CSS = `
   position: absolute;
   left: 0;
   right: 0;
-  top: -8px;
-  bottom: -8px;
+  /* Extend the pointer hit area to 44px (the 10px visual bar plus 17px above
+     and below) so the resize handle meets the touch-target floor without
+     thickening the bar itself. */
+  top: -17px;
+  bottom: -17px;
 }
 .ws-chat-divider:hover,
 .ws-chat-divider:focus-visible {
@@ -1138,9 +1155,9 @@ export const CSS = `
 
 /* mobius-ui:SyncPill v1 — keep in sync; library candidate. Diverge below the marker only. */
 /* ---- sync pill ----
-   Hidden in the steady state (online + 0 pending); only appears when there's
-   something to say. Same shape as the latex + atlas apps so the platform
-   feels coherent. */
+   Silent when healthy: not rendered while online (no "saving" / pending
+   counts). Only the offline state shows, as a plain "Offline". Same shape as
+   the latex + atlas apps so the platform feels coherent. */
 .ws-sync-pill {
   position: absolute;
   /* Floating default (un-floated to static in the header below): keep the pill
@@ -1168,10 +1185,6 @@ export const CSS = `
   height: 7px;
   border-radius: 50%;
   background: var(--muted);
-}
-.ws-sync-pill--pending .ws-sync-pill-dot {
-  background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .ws-sync-pill--offline {
   border-color: var(--accent);

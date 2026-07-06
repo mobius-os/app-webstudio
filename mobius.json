@@ -1,7 +1,7 @@
 {
   "id": "webstudio",
   "name": "Web Studio",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "description": "Build a website with the agent and preview it live in an in-app browser.",
   "author": "mobius-os",
   "license": "MIT",
@@ -9,11 +9,6 @@
   "entry": "index.jsx",
   "icon": "icon.png",
   "offline_capable": false,
-  "offline": {
-    "reads": true,
-    "writes": "queued",
-    "execution": "none"
-  },
   "embeds_agent": true,
   "permissions": {
     "cross_app_access": "none",
@@ -84,7 +79,6 @@
     "ui/ChatPanel.jsx",
     "ui/useModal.jsx",
     "ui/ModalView.jsx",
-    "ui/SyncPill.jsx",
-    "seeds/files/app.js"
+    "ui/SyncPill.jsx"
   ]
 }

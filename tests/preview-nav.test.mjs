@@ -1,18 +1,17 @@
 // Unit tests for the preview's link policy and the first-load file pick.
 // The functions under test are pure module-level exports of index.jsx, so the
-// whole app is bundled once (esbuild, platform=node) and imported — the same
-// harness app-atlas uses. react resolves from the mobius frontend checkout and
-// @codemirror/* from app-notes' node_modules via NODE_PATH.
+// whole app is bundled once (esbuild, platform=node) and imported. Everything
+// resolves from THIS repo's own node_modules after `npm install`: esbuild and
+// react are devDependencies, and @codemirror/* are aliased to a local stub, so
+// the harness is portable on a fresh clone (no host-pinned absolute paths).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
-const esbuild = '/home/hmzmrzx/projects/mobius/frontend/node_modules/.bin/esbuild'
-const nodePath = [
-  '/home/hmzmrzx/projects/mobius/frontend/node_modules',
-  '/home/hmzmrzx/projects/mobius-catalog-work/app-notes/node_modules',
-].join(':')
+const repoRoot = fileURLToPath(new URL('..', import.meta.url))
+const esbuild = fileURLToPath(new URL('../node_modules/.bin/esbuild', import.meta.url))
 mkdirSync(new URL('./.build/', import.meta.url), { recursive: true })
 execFileSync(esbuild, [
   '--bundle',
@@ -25,8 +24,7 @@ execFileSync(esbuild, [
   'index.jsx',
   '--outfile=tests/.build/index.mjs',
 ], {
-  cwd: new URL('..', import.meta.url),
-  env: { ...process.env, NODE_PATH: nodePath },
+  cwd: repoRoot,
   stdio: 'pipe',
 })
 
@@ -35,6 +33,7 @@ const {
   pickAutoSelectPath,
   resolveSiteAsset,
   clampChatRatio,
+  isManagedJsonPath,
   WS_PREVIEW_NAV_SCRIPT,
 } = await import('./.build/index.mjs')
 
@@ -128,6 +127,29 @@ test('auto-select prefers the main page over alphabetical order', () => {
   assert.equal(pickAutoSelectPath(['files/style.css'], null), 'files/style.css')
   assert.equal(pickAutoSelectPath(['files/img/.keep', 'files/logo.png'], null), 'files/logo.png')
   assert.equal(pickAutoSelectPath(['files/img/.keep'], null), null)
+})
+
+// ----------------------------------------------------------------------
+// Managed-JSON classification (isManagedJsonPath). Regression guard for the
+// medium bug where EVERY .json was treated as read-only typed JSON, so a
+// user's files/data.json was written as text but read as JSON (assertReadKind
+// wrong-kind) and could not be edited. Only the app's OWN metadata is managed;
+// user files under files/ (including .json) are editable source.
+// ----------------------------------------------------------------------
+test('isManagedJsonPath marks only the app metadata, not user files', () => {
+  // App metadata — managed (read-only, typed JSON), scoped and root-prefixed.
+  for (const p of ['files-index.json', 'main.json', 'chat_id.json',
+    'build/status.json', 'build/dispatch.json',
+    'projects/abc/main.json', 'projects/abc/build/status.json']) {
+    assert.equal(isManagedJsonPath(p), true, `${p} should be managed`)
+  }
+  // User source under files/ — NOT managed, so it round-trips as editable text.
+  for (const p of ['files/data.json', 'files/config.json', 'files/index.html',
+    'files/css/site.css', 'projects/abc/files/data.json']) {
+    assert.equal(isManagedJsonPath(p), false, `${p} should be editable source`)
+  }
+  assert.equal(isManagedJsonPath(''), false)
+  assert.equal(isManagedJsonPath(null), false)
 })
 
 // ----------------------------------------------------------------------

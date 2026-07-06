@@ -74,6 +74,7 @@ export {
   entryFromBuildStatusForDoc,
   entryPathForHtmlDoc,
   isHtmlDoc,
+  isManagedJsonPath,
   isSafeRelPath,
   isSafeStoragePath,
   normalizeFileCacheSnapshot,

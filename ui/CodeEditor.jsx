@@ -5,7 +5,9 @@ import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirro
 
 const cmThemePlain = EditorView.theme({
   '&': { height: '100%', backgroundColor: 'transparent', color: 'var(--text)' },
-  '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--mono)', lineHeight: '1.6', fontSize: '13.5px' },
+  // 16px so tapping into the editable source never triggers iOS zoom-on-focus
+  // (which fires for any editable text below 16px).
+  '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--mono)', lineHeight: '1.6', fontSize: '16px' },
   '.cm-content': { padding: '14px 16px 30vh', caretColor: 'var(--accent)' },
   '&.cm-focused': { outline: 'none' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
