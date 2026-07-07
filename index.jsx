@@ -136,9 +136,34 @@ export default function App({ appId, token }) {
   const fileSavingRef = useRef(fileSaving)
   // The in-flight autosave write, so flushDirtyEdits can AWAIT it (not poll a flag).
   const savePromiseRef = useRef(null)
+  // Holds the armed autosave setTimeout id so discardAndSelect can CANCEL it
+  // synchronously — deleting the open file must not let a pending autosave fire
+  // storage.setText and RECREATE the file we just removed.
+  const autosaveTimerRef = useRef(null)
+  // Forward handle to switchFile (defined far below, after its flush deps). Lets
+  // the earlier create handler route selection through the one canonical
+  // flush-then-select path without a temporal-dead-zone reference.
+  const switchFileRef = useRef(null)
   useEffect(() => { fileContentRef.current = fileContent }, [fileContent])
   useEffect(() => { fileDirtyRef.current = fileDirty }, [fileDirty])
   useEffect(() => { fileSavingRef.current = fileSaving }, [fileSaving])
+  // Select `path` while DISCARDING the outgoing file's pending edits — the
+  // mirror of switchFile for the DELETE case. switchFile flushes the old buffer
+  // (saves it); a just-deleted file must NOT be flushed (that would recreate
+  // it). Cancel the armed autosave and drop the dirty/saving flags (refs +
+  // state) synchronously so neither the load effect nor a stray timer writes the
+  // dead buffer under the newly-selected path, then select.
+  const discardAndSelect = useCallback((path) => {
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current)
+      autosaveTimerRef.current = null
+    }
+    fileDirtyRef.current = false
+    fileSavingRef.current = false
+    setFileDirty(false)
+    setFileSaving(false)
+    setSelectedPath(path)
+  }, [])
   const [chatOpen, setChatOpen] = useState(() => readChatOpen(appId))
   const [chatRatio, setChatRatio] = useState(() => readChatRatio(appId))
   const [publishedUrl, setPublishedUrl] = useState(null)
@@ -826,9 +851,14 @@ export default function App({ appId, token }) {
       await storage.setJSON('files-index.json', next)
       setFiles(next)
       setFileCache((prev) => ({ ...prev, [path]: '' }))
-      setSelectedPath(path)
-      closeNav()
       signal('item_created', { type: 'file' })
+      closeNav()
+      // Select the new file through switchFile so the CURRENTLY-OPEN file's dirty
+      // buffer is FLUSHED (saved) before we move on. Setting the path directly
+      // armed the autosave for the NEW path with the OLD file's buffer — the same
+      // dirty-switch data-loss class the file-tree selection already guards.
+      if (switchFileRef.current) await switchFileRef.current(path)
+      else setSelectedPath(path)
     } catch (e) {
       signal('error', { message: String(e.message || e), source: 'save' })
       await modal.alert(e.message || String(e), { title: 'Could not create file' })
@@ -918,14 +948,17 @@ export default function App({ appId, token }) {
       build.forgetDoc(path)
       if (selectedPath === path) {
         const nextReal = next.find((p) => !p.endsWith('/.keep'))
-        setSelectedPath(nextReal || null)
+        // DISCARD, don't flush: the file we just removed must not have its dirty
+        // buffer flushed back — that would recreate it. discardAndSelect cancels
+        // the armed autosave and clears the dirty/saving flags before selecting.
+        discardAndSelect(nextReal || null)
       }
       signal('item_deleted', { type: 'file' })
     } catch (e) {
       signal('error', { message: String(e.message || e), source: 'delete' })
       await modal.alert(e.message || String(e), { title: 'Could not delete' })
     }
-  }, [selectedPath, storage, modal, ensureIndexWritable, build])
+  }, [selectedPath, storage, modal, ensureIndexWritable, build, discardAndSelect])
 
   // ---- Upload (files + whole folders) ------------------------------------
   const uploadFiles = useCallback(async (fileList, { asFolder } = {}) => {
@@ -1101,17 +1134,20 @@ export default function App({ appId, token }) {
         for (const [p, v] of Object.entries(prev)) if (!under(p)) out[p] = v
         return out
       })
-      setSelectedPath((cur) => {
-        if (cur && under(cur)) return next.find((p) => !p.endsWith('/.keep')) || null
-        return cur
-      })
+      // If the OPEN file lived under the deleted folder, DISCARD its buffer and
+      // fall back — flushing would recreate a file inside the folder we removed.
+      // If the open file is elsewhere, leave the selection untouched.
+      const openPath = selectedPathRef.current
+      if (openPath && under(openPath)) {
+        discardAndSelect(next.find((p) => !p.endsWith('/.keep')) || null)
+      }
       build.forgetUnder(folderPath)
       signal('item_deleted', { type: 'folder' })
     } catch (e) {
       signal('error', { message: String(e.message || e), source: 'delete' })
       await modal.alert(e.message || String(e), { title: 'Delete failed' })
     }
-  }, [storage, modal, ensureIndexWritable, build])
+  }, [storage, modal, ensureIndexWritable, build, discardAndSelect])
 
   const selectedExt = selectedPath ? extensionFor(selectedPath) : ''
   const selectedIsBinary = selectedPath ? isBinaryProjectPath(selectedPath) : false
@@ -1157,6 +1193,7 @@ export default function App({ appId, token }) {
     const path = selectedPath
     const body = fileContent
     const timer = setTimeout(() => {
+      autosaveTimerRef.current = null
       if (selectedPathRef.current !== path) return
       setFileSaving(true)
       // Publish the in-flight write so flushDirtyEdits can await it before a
@@ -1179,7 +1216,11 @@ export default function App({ appId, token }) {
       })
       savePromiseRef.current = p
     }, SOURCE_AUTOSAVE_MS)
-    return () => clearTimeout(timer)
+    autosaveTimerRef.current = timer
+    return () => {
+      clearTimeout(timer)
+      if (autosaveTimerRef.current === timer) autosaveTimerRef.current = null
+    }
   }, [
     selectedPath,
     selectedIsBinary,
@@ -1249,6 +1290,9 @@ export default function App({ appId, token }) {
     setSelectedPath(path)
     if (path) signal('item_opened', { type: 'file' })
   }, [flushDirtyEdits])
+  // Mirror switchFile onto a ref so handlers defined ABOVE it (handleCreateFile)
+  // can flush-then-select through it without a temporal-dead-zone reference.
+  useEffect(() => { switchFileRef.current = switchFile }, [switchFile])
 
   const resetFileUi = useCallback(() => {
     clearBuildPoll()
