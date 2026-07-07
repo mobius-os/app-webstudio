@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { signal } from '../analytics.js'
-import { BUILD_POLL_MS, BUILD_TIMEOUT_MS } from '../constants.js'
-import { entryFromBuildStatusForDoc, entryPathForHtmlDoc, isHtmlDoc } from '../domain.js'
+import { BUILD_CLAIM_SETTLE_MS, BUILD_POLL_MS, BUILD_TIMEOUT_MS } from '../constants.js'
+import {
+  buildTargetSuperseded,
+  claimIsOurs,
+  entryFromBuildStatusForDoc,
+  entryPathForHtmlDoc,
+  foreignClaimBlocks,
+  isHtmlDoc,
+} from '../domain.js'
 
 export function useBuild({ appId, token, storage, rootStorage, prefix, online }) {
   const [buildStatus, setBuildStatus] = useState('idle') // idle|building|done|error
@@ -130,8 +137,26 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
       finishError(status.log || 'Build failed.')
       return
     }
+    // No verdict yet. /run-job's build.sh reads a single shared ROOT
+    // build/target.txt; once it no longer names OUR target, a concurrent build
+    // has taken the one build slot and this verdict will never land. Fail fast
+    // with an actionable message rather than waiting out the full 2-minute
+    // timeout (the silent-timeout symptom). A transient read failure (offline
+    // blip) is ignored — the deadline above still bounds the wait.
+    try {
+      const rootTarget = await rootStorage.getFresh('build/target.txt')
+      if (generation !== buildGenerationRef.current) return
+      if (buildTargetSuperseded(rootTarget, `${prefix || ''}${doc}`)) {
+        releaseClaim()
+        signalBuildCompleted('error')
+        finishError('Another build superseded this one — retry when it finishes.')
+        return
+      }
+    } catch (e) {
+      // Keep polling; the deadline is the backstop.
+    }
     pollRef.current = setTimeout(() => poll(doc, onDone, generation), BUILD_POLL_MS)
-  }, [storage, finishDone, finishError, releaseClaim, signalBuildCompleted])
+  }, [storage, rootStorage, prefix, finishDone, finishError, releaseClaim, signalBuildCompleted])
 
   // Kick a build for `doc` (a "files/<entry>.html" path). onDone fires once the
   // site is assembled. Guards against concurrent builds + offline.
@@ -143,19 +168,25 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
       return
     }
     const myTarget = `${prefix || ''}${doc}`
-    // Serialize builds app-wide. /run-job carries no project context, so
-    // build.sh reads a single shared ROOT build/target.txt; two near-
-    // simultaneous builds (another tab/device) would race on it — both could
-    // build the later target while the first poller waits for a verdict that
-    // never lands and then times out. A root dispatch claim lets a second build
-    // SEE that one is in flight and refuse cleanly rather than race into a
-    // silent timeout. Best-effort: a genuine same-instant double-write still
-    // races; a fully race-free fix needs per-project dispatch through the
-    // run-job API, which is a backend change out of this app's scope.
+    // Serialize builds app-wide. /run-job carries no project context, so build.sh
+    // reads a single shared ROOT build/target.txt — there is exactly one build
+    // slot per app. Two near-simultaneous builds (another tab/device) must not
+    // both write that target, or build.sh builds the later one while the first
+    // poller waits for a verdict that never lands and then times out (the silent
+    // 2-minute symptom). Two guards, in order:
+    //   1. Pre-check (below): a fresh claim for a DIFFERENT target already in
+    //      flight → refuse now, WITHOUT touching that live claim.
+    //   2. Claim-first-then-read-back (in the try): write our own claim BEFORE
+    //      the shared root target, settle, then read it back — last-writer-wins
+    //      means exactly one of two simultaneous starters reads its own target
+    //      back; the other refuses before it can strand the winner's poller.
+    // Best-effort still: a start that slips past the settle window is caught by
+    // the poller's fail-fast on the root target (see poll), which turns a would-
+    // be silent timeout into an actionable "superseded" message. A fully race-
+    // free fix needs per-project dispatch through the run-job API (backend).
     try {
-      const claim = await rootStorage.get('build/dispatch.json')
-      if (claim && typeof claim === 'object' && claim.target && claim.target !== myTarget
-          && Number.isFinite(claim.at) && Date.now() - claim.at < BUILD_TIMEOUT_MS) {
+      const claim = await rootStorage.getFresh('build/dispatch.json')
+      if (foreignClaimBlocks(claim, myTarget, Date.now(), BUILD_TIMEOUT_MS)) {
         finishError('Another page is building right now (possibly on another '
           + 'device). Wait for it to finish, then Build again.')
         return
@@ -174,18 +205,33 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
       // 0. Clear any verdict from a PRIOR build so the first poll sees 404
       // (still building) until the new run lands a fresh verdict.
       await storage.remove('build/status.json')
-      // 1. Tell the build script which page is the entry.
+      // 1. Record the per-project target (durable app state). build.sh itself
+      // reads the shared ROOT target written in step 3, only after we confirm we
+      // hold the slot — so this per-project write is bookkeeping, not the trigger.
       await storage.setText('build/target.txt', doc)
-      // 1b. /run-job invokes build.sh with only appId, so the script reads a
-      // root dispatch target that can point at either the legacy root project
-      // or a projects/<id>/ subtree. The actual per-project target above is
-      // still the durable storage key used by the app.
-      await rootStorage.setText('build/target.txt', myTarget)
-      // 1c. Claim the dispatch (timestamped) so a concurrent build refuses
-      // instead of racing on the shared root target above.
+      // 2. Claim the dispatch slot FIRST, then confirm by reading it back after a
+      // short settle. Writing the claim before the shared root target is what
+      // closes the read-then-write race: if another instance overwrote our claim
+      // in the settle window, the read-back names ITS target and we refuse here —
+      // before writing the root target that would strand its poller.
       claimedRef.current = true
       await rootStorage.setJSON('build/dispatch.json', { target: myTarget, at: Date.now() })
-      // 2. Kick the server-side job. 202 = accepted; anything else is fatal.
+      await new Promise((resolve) => setTimeout(resolve, BUILD_CLAIM_SETTLE_MS))
+      const readback = await rootStorage.getFresh('build/dispatch.json')
+      if (!claimIsOurs(readback, myTarget)) {
+        // Another instance won the slot. Refuse cleanly — do NOT releaseClaim()
+        // (that would delete THEIR live claim); just drop our own intent and
+        // reset the transient build state, mirroring the pre-check refuse.
+        claimedRef.current = false
+        buildStartRef.current = 0
+        finishError('Another page is building right now (possibly on another '
+          + 'device). Wait for it to finish, then Build again.')
+        return
+      }
+      // 3. We hold the slot: point the shared ROOT target (what build.sh reads,
+      // possibly a projects/<id>/ subtree) at us, then kick the job.
+      await rootStorage.setText('build/target.txt', myTarget)
+      // 4. Kick the server-side job. 202 = accepted; anything else is fatal.
       const r = await fetch(`/api/apps/${appId}/run-job`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -201,7 +247,8 @@ export function useBuild({ appId, token, storage, rootStorage, prefix, online })
         )
         return
       }
-      // 3. Poll status.json until the script writes its verdict.
+      // 5. Poll status.json until the script writes its verdict (or a concurrent
+      // build supersedes our root target — poll() fails fast on that).
       deadlineRef.current = Date.now() + BUILD_TIMEOUT_MS
       pollRef.current = setTimeout(() => poll(doc, onDone, generation), BUILD_POLL_MS)
     } catch (e) {

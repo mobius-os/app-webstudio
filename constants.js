@@ -14,6 +14,9 @@ export const CHAT_DIVIDER_PX = 10
 export const CHAT_PANE_MIN_PX = CHAT_PILL_MIN_PX + CHAT_DIVIDER_PX
 export const BUILD_POLL_MS = 2000
 export const BUILD_TIMEOUT_MS = 120000
+// How long to let a freshly-written dispatch claim settle before reading it
+// back to confirm we won the single build slot (see useBuild.build).
+export const BUILD_CLAIM_SETTLE_MS = 150
 export const SOURCE_AUTOSAVE_MS = 700
 export const SOURCE_SYNC_MS = 3500
 export const PROJECT_SYNC_MS = 5000

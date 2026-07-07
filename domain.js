@@ -109,6 +109,42 @@ export function entryPathForHtmlDoc(doc) {
   return `build/site/${doc.slice('files/'.length)}`
 }
 
+// ---- Build dispatch (app-wide single-slot serialization) ----------------
+// /run-job carries no project context, so build.sh reads ONE shared root
+// build/target.txt and there is one build slot per app. These predicates make
+// the claim/supersede decisions pure and testable; useBuild wires them to
+// fresh server reads.
+
+// The pre-check that lets a build refuse when ANOTHER page is already building.
+// A claim blocks only when it is a well-formed, still-fresh claim for a
+// DIFFERENT target — a same-target claim is harmless (both builds converge on
+// the same output) and a stale claim (older than the timeout) has aged out.
+export function foreignClaimBlocks(claim, myTarget, now, timeoutMs) {
+  if (!claim || typeof claim !== 'object') return false
+  if (typeof claim.target !== 'string' || !claim.target || claim.target === myTarget) return false
+  if (!Number.isFinite(claim.at)) return false
+  return (now - claim.at) < timeoutMs
+}
+
+// After writing our own claim we read it back: it is OURS only when the
+// read-back target still matches. A different target means another instance
+// overwrote our claim in the settle window and won the slot (last write wins).
+export function claimIsOurs(readback, myTarget) {
+  return !!readback && typeof readback === 'object' && readback.target === myTarget
+}
+
+// The poller's fail-fast check: has the shared root build/target.txt stopped
+// naming OUR build? A different, NON-EMPTY target means a concurrent build took
+// the slot and our verdict will never land — stop now instead of waiting out
+// the full timeout. An empty/missing/non-string target (never written yet, or a
+// transient read) is NOT a supersede.
+export function buildTargetSuperseded(rootTarget, myTarget) {
+  if (typeof rootTarget !== 'string') return false
+  const seen = rootTarget.trim()
+  if (!seen) return false
+  return seen !== myTarget
+}
+
 export function cleanIndexPaths(paths) {
   return [...new Set((paths || []).filter(isSafeStoragePath))].sort()
 }
