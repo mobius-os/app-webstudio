@@ -15,7 +15,7 @@ import { UploadIcon } from './UploadIcon.jsx'
 export function FileNavPanel({
   appId, open, onClose, files, selectedPath, onSelect, canMutate,
   onCreateFile, onCreateFolder, onDeleteFile, onDeleteFolder,
-  onUpload, onMove, onRename, mainPath, onSetMain, returnFocusRef,
+  onUpload, onMove, onMoveTo, onRename, mainPath, onSetMain, returnFocusRef,
   projects, projectsLoaded, activeProjectId,
   onSwitchProject, onNewProject, onRenameProject, onDeleteProject,
   renamingId, onCommitProjectRename, onCancelProjectRename,
@@ -182,6 +182,7 @@ export function FileNavPanel({
     ...(!ctx.isFolder && isHtmlDoc(ctx.path) && ctx.path !== mainPath
       ? [{ label: 'Set as main page', onSelect: () => onSetMain(ctx.path) }]
       : []),
+    { label: 'Move to...', onSelect: () => onMoveTo(ctx.path) },
     { label: 'Rename', onSelect: () => onRename(ctx.path) },
     {
       label: 'Delete',

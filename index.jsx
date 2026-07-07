@@ -1088,6 +1088,23 @@ export default function App({ appId, token }) {
     }
   }, [storage, modal, ensureIndexWritable, build])
 
+  const handleMoveTo = useCallback(async (path) => {
+    const leaf = path.split('/').pop()
+    const currentParent = path.split('/').slice(1, -1).join('/')
+    const dest = await modal.prompt(
+      'Destination folder — use / for the project root',
+      { title: 'Move to folder', placeholder: 'css', defaultValue: currentParent },
+    )
+    if (dest === null) return
+    const clean = String(dest || '').replace(/^\/+/, '').replace(/\/+$/, '').trim()
+    const base = (!clean || clean === '.') ? 'files' : `files/${clean}`
+    if (base !== 'files' && !isSafeRelPath(clean)) {
+      await modal.alert('Use letters, digits, . - _ / only.', { title: 'Invalid folder' })
+      return
+    }
+    await movePath(path, `${base}/${leaf}`)
+  }, [modal, movePath])
+
   const handleRename = useCallback(async (path) => {
     const parts = path.split('/')
     const leaf = parts[parts.length - 1]
@@ -1785,6 +1802,7 @@ export default function App({ appId, token }) {
           onDeleteFolder={handleDeleteFolder}
           onUpload={uploadFiles}
           onMove={movePath}
+          onMoveTo={handleMoveTo}
           onRename={handleRename}
           mainPath={mainPath}
           onSetMain={handleSetMain}

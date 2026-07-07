@@ -4,27 +4,56 @@ import { LONG_PRESS_MS, LONG_PRESS_SLOP } from '../constants.js'
 export function useLongPress(onLongPress) {
   const timerRef = useRef(null)
   const startRef = useRef(null)
+  const suppressClickRef = useRef(false)
   const clear = useCallback(() => {
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
     startRef.current = null
   }, [])
   useEffect(() => clear, [clear])
-  const onTouchStart = useCallback((e) => {
-    const t = e.touches && e.touches[0]
-    if (!t) return
-    startRef.current = { x: t.clientX, y: t.clientY }
+  const onPointerDown = useCallback((e) => {
+    if (e.pointerType === 'mouse' || e.button !== 0) return
+    startRef.current = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      target: e.currentTarget,
+    }
+    try { e.currentTarget.setPointerCapture?.(e.pointerId) } catch {}
     timerRef.current = setTimeout(() => {
       timerRef.current = null
-      if (startRef.current) onLongPress(startRef.current.x, startRef.current.y)
+      const start = startRef.current
+      if (!start) return
+      suppressClickRef.current = true
+      onLongPress(start.x, start.y)
     }, LONG_PRESS_MS)
   }, [onLongPress])
-  const onTouchMove = useCallback((e) => {
-    const t = e.touches && e.touches[0]
-    if (!t || !startRef.current) return
-    if (Math.abs(t.clientX - startRef.current.x) > LONG_PRESS_SLOP
-      || Math.abs(t.clientY - startRef.current.y) > LONG_PRESS_SLOP) {
+  const onPointerMove = useCallback((e) => {
+    const start = startRef.current
+    if (!start || e.pointerId !== start.id) return
+    if (Math.abs(e.clientX - start.x) > LONG_PRESS_SLOP
+      || Math.abs(e.clientY - start.y) > LONG_PRESS_SLOP) {
       clear()
     }
   }, [clear])
-  return { onTouchStart, onTouchMove, onTouchEnd: clear, onTouchCancel: clear }
+  const finishPointer = useCallback((e) => {
+    const start = startRef.current
+    if (start && e.pointerId === start.id) {
+      try { start.target?.releasePointerCapture?.(start.id) } catch {}
+    }
+    clear()
+  }, [clear])
+  const onClickCapture = useCallback((e) => {
+    if (!suppressClickRef.current) return
+    suppressClickRef.current = false
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+  return {
+    onPointerDown,
+    onPointerMove,
+    onPointerUp: finishPointer,
+    onPointerCancel: finishPointer,
+    onLostPointerCapture: clear,
+    onClickCapture,
+  }
 }
