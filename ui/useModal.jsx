@@ -24,9 +24,11 @@ export function useModal() {
     if (window.mobius?.nav?.open) {
       const handle = window.mobius.nav.open('webstudio-modal', () => finish(backValue, true))
       navRef.current = handle
-      Promise.resolve(handle.ready).finally(() => {
-        if (navRef.current === handle) show()
-      })
+      Promise.resolve(handle.ready)
+        .catch(() => false)
+        .finally(() => {
+          if (navRef.current === handle) show()
+        })
     } else {
       show()
     }

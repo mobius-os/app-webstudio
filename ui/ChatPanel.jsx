@@ -79,9 +79,3 @@ export function ChatPanel({
     </section>
   )
 }
-
-// ----------------------------------------------------------------------
-// Online/offline detection. The runtime's `window.mobius.online` is a
-// getter over `navigator.onLine` — same source, no separate change event —
-// so we track `navigator.onLine` directly and react to the browser's own
-// 'online'/'offline' events.

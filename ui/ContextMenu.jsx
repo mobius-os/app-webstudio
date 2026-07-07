@@ -1,7 +1,30 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export function ContextMenu({ x, y, items, onClose }) {
   const ref = useRef(null)
+  const navRef = useRef(null)
+  const [ready, setReady] = useState(() => !(typeof window !== 'undefined' && window.mobius?.nav?.open))
+  useEffect(() => {
+    if (!(typeof window !== 'undefined' && window.mobius?.nav?.open)) {
+      setReady(true)
+      return undefined
+    }
+    let cancelled = false
+    const handle = window.mobius.nav.open('webstudio-context-menu', onClose)
+    navRef.current = handle
+    Promise.resolve(handle.ready)
+      .catch(() => false)
+      .finally(() => {
+        if (!cancelled && navRef.current === handle) setReady(true)
+      })
+    return () => {
+      cancelled = true
+      if (navRef.current === handle) {
+        try { handle.close?.() } catch {}
+        navRef.current = null
+      }
+    }
+  }, [onClose])
   useEffect(() => {
     const onDown = (e) => {
       // A press on a popover trigger (a row kebab) is owned by that trigger's
@@ -20,6 +43,7 @@ export function ContextMenu({ x, y, items, onClose }) {
       window.removeEventListener('scroll', onClose, true)
     }
   }, [onClose])
+  if (!ready) return null
   const left = Math.min(x, (typeof window !== 'undefined' ? window.innerWidth : 9999) - 180)
   const top = Math.min(y, (typeof window !== 'undefined' ? window.innerHeight : 9999) - (items.length * 44 + 8))
   return (

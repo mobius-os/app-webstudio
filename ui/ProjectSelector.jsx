@@ -7,7 +7,9 @@ export function ProjectSelector({
   onSwitchProject, renamingId, onCommitRename, onCancelRename,
 }) {
   const [open, setOpen] = useState(false)
+  const [menuReady, setMenuReady] = useState(false)
   const ref = useRef(null)
+  const navRef = useRef(null)
   const inputRef = useRef(null)
   // Set when Enter/Escape already resolved the edit, so the blur that fires as
   // the input unmounts does not commit a second (or, on Escape, a cancelled) value.
@@ -25,7 +27,22 @@ export function ProjectSelector({
   }, [active.id, renamingId])
 
   useEffect(() => {
-    if (!open) return undefined
+    if (!open) {
+      setMenuReady(false)
+      return undefined
+    }
+    let cancelled = false
+    if (window.mobius?.nav?.open) {
+      const handle = window.mobius.nav.open('webstudio-project-menu', () => setOpen(false))
+      navRef.current = handle
+      Promise.resolve(handle.ready)
+        .catch(() => false)
+        .finally(() => {
+          if (!cancelled && navRef.current === handle) setMenuReady(true)
+        })
+    } else {
+      setMenuReady(true)
+    }
     const onDown = (e) => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false)
     }
@@ -33,6 +50,11 @@ export function ProjectSelector({
     window.addEventListener('pointerdown', onDown, true)
     window.addEventListener('keydown', onKey)
     return () => {
+      cancelled = true
+      if (navRef.current) {
+        try { navRef.current.close?.() } catch {}
+        navRef.current = null
+      }
       window.removeEventListener('pointerdown', onDown, true)
       window.removeEventListener('keydown', onKey)
     }
@@ -70,7 +92,7 @@ export function ProjectSelector({
           <ChevronIcon size={13} />
         </button>
       )}
-      {open && (
+      {open && menuReady && (
         <div className="ws-project-menu" role="menu">
           <div className="ws-project-list" role="group" aria-label="Projects">
             {projectsLoaded ? projects.map((project) => (
