@@ -1489,6 +1489,9 @@ export default function App({ appId, token }) {
         const data = await r.json()
         detail = data.detail || data.error || ''
       } catch { /* non-JSON */ }
+      // A non-throw HTTP failure is still a failure Reflection should see — the
+      // throw path signals, so this branch must too, or a 500 goes untracked.
+      signal('error', { message: detail || `publish → ${r.status}`, source: 'publish' })
       await modal.alert(detail || `Publish failed (${r.status}).`, { title: 'Publish failed' })
     } catch (e) {
       signal('error', { message: String(e.message || e), source: 'publish' })
@@ -1521,6 +1524,8 @@ export default function App({ appId, token }) {
         const data = await r.json()
         detail = data.detail || data.error || ''
       } catch { /* non-JSON */ }
+      // Signal the non-throw HTTP failure too — same reason as publish above.
+      signal('error', { message: detail || `unpublish → ${r.status}`, source: 'unpublish' })
       await modal.alert(detail || `Unpublish failed (${r.status}).`, { title: 'Unpublish failed' })
     } catch (e) {
       signal('error', { message: String(e.message || e), source: 'publish' })
