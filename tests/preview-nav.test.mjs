@@ -139,7 +139,7 @@ test('auto-select prefers the main page over alphabetical order', () => {
 test('isManagedJsonPath marks only the app metadata, not user files', () => {
   // App metadata — managed (read-only, typed JSON), scoped and root-prefixed.
   for (const p of ['files-index.json', 'main.json', 'chat_id.json',
-    'build/status.json', 'build/dispatch.json',
+    'build/status.json', 'build/dispatch.json', 'projects.json',
     'projects/abc/main.json', 'projects/abc/build/status.json']) {
     assert.equal(isManagedJsonPath(p), true, `${p} should be managed`)
   }

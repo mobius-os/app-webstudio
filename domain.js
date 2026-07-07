@@ -56,6 +56,7 @@ const MANAGED_JSON_NAMES = new Set([
   'chat_id.json',
   'build/status.json',
   'build/dispatch.json',
+  'projects.json',
 ])
 export function isManagedJsonPath(path) {
   const rel = String(path || '').replace(/^projects\/[A-Za-z0-9_-]+\//, '')
