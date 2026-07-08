@@ -13,7 +13,7 @@
 //
 // Only App lives here: it owns top-level project/file/editor/build/chat state,
 // persistence wiring, and mounts the source/preview/file/chat UI.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { signal } from './analytics.js'
 import {
   CHAT_PANE_MIN_PX,
@@ -107,6 +107,7 @@ export default function App({ appId, token }) {
   const [navOpen, setNavOpen] = useState(false)
   const navHandleRef = useRef(null)
   const navOpenRef = useRef(false)
+  const chatNavRef = useRef(null)
   useEffect(() => { navOpenRef.current = navOpen }, [navOpen])
   const openNavRef = useRef(null)
   // Modals ride the shell's single-surface nav, which closes the drawer when a
@@ -331,6 +332,30 @@ export default function App({ appId, token }) {
       return !open
     })
   }, [])
+
+  // The chat panel is a bottom-pinned sheet, so a shell back gesture with it open
+  // must collapse the sheet, not exit Web Studio. Register the shell back target
+  // in a layout effect (BEFORE paint) keyed on chatOpen so the target is owned
+  // the moment the sheet is committed — including on mount when chatOpen was
+  // restored true from a prior session — with no mount→effect frame in which a
+  // back gesture could escape the overlay. onBack closes the chat and nulls the
+  // ref so the cleanup's close is a no-op; the ready boolean never rejects
+  // (RESOLVES true=owned / false=refused/timeout), we just consume it.
+  useLayoutEffect(() => {
+    if (!chatOpen || !(window.mobius?.nav?.open)) return undefined
+    const handle = window.mobius.nav.open('webstudio-chat', () => {
+      chatNavRef.current = null
+      setChatOpen(false)
+    })
+    chatNavRef.current = handle
+    Promise.resolve(handle.ready).catch(() => false)
+    return () => {
+      if (chatNavRef.current === handle) {
+        try { handle.close?.() } catch {}
+        chatNavRef.current = null
+      }
+    }
+  }, [chatOpen])
 
   const beginChatResize = useCallback((event) => {
     event.preventDefault()
