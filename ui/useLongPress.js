@@ -12,6 +12,12 @@ export function useLongPress(onLongPress) {
   useEffect(() => clear, [clear])
   const onPointerDown = useCallback((e) => {
     if (e.pointerType === 'mouse' || e.button !== 0) return
+    // A fresh press starts a new gesture, so drop any suppression still armed by
+    // a prior long-press. That flag self-clears only via onClickCapture on THIS
+    // row; if the long-press's own click instead landed on the popover it opened
+    // (over the row), the flag would otherwise linger and swallow the next
+    // legitimate tap. Clearing here scopes suppression to its own gesture's click.
+    suppressClickRef.current = false
     startRef.current = {
       id: e.pointerId,
       x: e.clientX,

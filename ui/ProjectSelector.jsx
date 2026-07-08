@@ -7,7 +7,11 @@ export function ProjectSelector({
   onSwitchProject, renamingId, onCommitRename, onCancelRename,
 }) {
   const [open, setOpen] = useState(false)
-  const [menuReady, setMenuReady] = useState(false)
+  // Ready immediately when there is no shell nav to await (mirror ContextMenu):
+  // gating only earns its keep while we wait for the shell to ack ownership of
+  // the back target. With no nav.open there is nothing to await, so gating would
+  // only add a one-frame open-delay.
+  const [menuReady, setMenuReady] = useState(() => !(window.mobius?.nav?.open))
   const ref = useRef(null)
   const navRef = useRef(null)
   const inputRef = useRef(null)
@@ -28,7 +32,11 @@ export function ProjectSelector({
 
   useEffect(() => {
     if (!open) {
-      setMenuReady(false)
+      // Reset to the same nav-aware baseline the initializer used, so a re-open
+      // with no nav stays ready (no delay frame) while a re-open with nav re-gates
+      // until the shell re-acks. A closed menu never renders either way (the
+      // `open &&` guard), so this only prepares the next open.
+      setMenuReady(!(window.mobius?.nav?.open))
       return undefined
     }
     let cancelled = false
