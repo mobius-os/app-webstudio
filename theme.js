@@ -6,21 +6,35 @@ export const CSS = `
   flex-direction: column;
   height: 100%;
   width: 100%;
+  max-width: 100%;
   /* Overlay scrims + shadows as local tokens so the raw rgba(0,0,0,…) values
      live in one place (and read against the dark theme rather than being
      scattered literals). */
   --ws-scrim: rgba(0, 0, 0, 0.45);
   --ws-scrim-soft: rgba(0, 0, 0, 0.35);
   --ws-shadow: rgba(0, 0, 0, 0.3);
-  background: var(--bg);
-  color: var(--text);
+  background: var(--bg, #0d0d0d);
+  color: var(--text, #ececec);
   font-family: var(--font, Inter, ui-sans-serif, system-ui, sans-serif);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
   text-rendering: geometricPrecision;
   overscroll-behavior: contain;
 }
 /* /mobius-ui:Root */
+
+/* mobius-ui:Scrollskin v2 — keep in sync; hidden by default, content stays scrollable. */
+.ws-root :where(.ws-build-log, .ws-project-menu, .ws-drawer-tree, .cm-scroller) {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.ws-root :where(.ws-build-log, .ws-project-menu, .ws-drawer-tree, .cm-scroller)::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+/* /mobius-ui:Scrollskin */
 
 /* mobius-ui:Focus v1 -- shared keyboard focus ring (WCAG 2.4.7); never bare outline:none */
 :where(button,a,input,textarea,select,summary,[role="button"],[tabindex]:not([tabindex="-1"])):focus-visible {
@@ -80,24 +94,29 @@ export const CSS = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.14s ease, color 0.14s ease, transform 0.08s ease;
 }
 /* Suppress only the UA mouse-focus outline (the owner-reported lingering box
    after closing the drawer); keyboard focus still gets the shared :focus-visible
    ring so a tabbing user sees where they are. */
 .ws-nav-toggle:focus:not(:focus-visible) { outline: none; }
-.ws-nav-toggle:active { opacity: 0.7; }
+.ws-nav-toggle:active { background: var(--surface2, var(--bg-alt, var(--surface))); transform: scale(0.94); }
 /* Drawer-toggle box-highlight (feature 142): neutral wash on hover/focus,
    accent wash while the file drawer is open, on the rounded 8px button. */
 @media (hover: hover) {
   .ws-nav-toggle:hover { background: var(--surface2, var(--bg-alt, var(--surface))); }
 }
 .ws-nav-toggle:focus-visible { background: var(--surface2, var(--bg-alt, var(--surface))); }
+.ws-nav-toggle[aria-expanded="true"] {
+  color: var(--accent);
+  background: var(--accent-dim, color-mix(in srgb, var(--accent) 12%, transparent));
+}
 /* The real app icon as the brand mark inside the drawer toggle. Sized to the
    34px Möbius brand mark so every mini-app header icon matches the shell. */
 .ws-brand-icon {
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: 8px;
   object-fit: cover;
   flex-shrink: 0;
   display: block;
@@ -504,7 +523,7 @@ export const CSS = `
   border: 1px solid var(--border-light, var(--border));
   border-radius: 12px;
   background: var(--bg);
-  box-shadow: 0 8px 28px var(--ws-scrim-soft);
+  box-shadow: 0 4px 8px var(--ws-scrim-soft);
 }
 .ws-project-list {
   display: flex;
@@ -568,8 +587,7 @@ export const CSS = `
 .ws-files-label {
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
+  letter-spacing: 0;
   color: var(--muted);
 }
 .ws-files-actions { display: flex; gap: 2px; }
@@ -659,10 +677,12 @@ export const CSS = `
   font-weight: 700;
   line-height: 1;
 }
-.ws-icon-btn:hover { background: var(--surface2, var(--surface)); color: var(--text); }
+@media (hover: hover) {
+  .ws-icon-btn:hover { background: var(--surface2, var(--surface)); color: var(--text); }
+  .ws-icon-btn--danger:hover { color: var(--danger, #f87171); }
+}
 .ws-icon-btn:active:not(:disabled) { background: var(--surface3, var(--surface2)); transform: scale(0.94); }
 .ws-icon-btn:disabled { opacity: 0.3; cursor: default; }
-.ws-icon-btn--danger:hover { color: var(--danger); }
 .ws-project-row {
   display: flex; align-items: center; gap: 4px;
   padding: 7px 8px 7px 10px;
@@ -753,9 +773,11 @@ export const CSS = `
 .ws-tree-menu-btn:focus-visible { opacity: 1; }
 /* Hover is a NEUTRAL grey wash (same family as the press), not an accent
    tint — accent is reserved for the open state below. */
-.ws-tree-menu-btn:hover {
-  color: var(--text);
-  background: var(--surface);
+@media (hover: hover) {
+  .ws-tree-menu-btn:hover {
+    color: var(--text);
+    background: var(--surface);
+  }
 }
 /* Pressed — NEUTRAL feedback. The press must not re-assert the open-state
    accent; it acknowledges the tap with a grey wash + scale (touch has no
@@ -851,15 +873,23 @@ export const CSS = `
   border-radius: 999px;
   background: var(--muted);
 }
-.ws-tree-set-main:hover,
 .ws-tree-set-main:focus-visible {
   opacity: 1;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
-.ws-tree-set-main:hover .ws-tree-set-main-dot,
 .ws-tree-set-main:focus-visible .ws-tree-set-main-dot {
   background: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+@media (hover: hover) {
+  .ws-tree-set-main:hover {
+    opacity: 1;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  .ws-tree-set-main:hover .ws-tree-set-main-dot {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
 }
 .ws-tree-file[draggable="true"] { cursor: grab; }
 /* Drop-target highlight while a drag hovers a folder or the root. */
@@ -890,7 +920,7 @@ export const CSS = `
      (12px) over a hairline --border-light edge. */
   border: 1px solid var(--border-light);
   border-radius: 12px;
-  box-shadow: 0 8px 28px var(--ws-scrim-soft);
+  box-shadow: 0 4px 8px var(--ws-scrim-soft);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1044,7 +1074,7 @@ export const CSS = `
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 8px 32px var(--ws-shadow);
+  box-shadow: 0 4px 8px var(--ws-shadow);
   width: 100%;
   max-width: 360px;
   padding: 18px 20px;
