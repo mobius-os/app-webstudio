@@ -141,6 +141,10 @@ export default function App({ appId, token }) {
   // synchronously — deleting the open file must not let a pending autosave fire
   // storage.setText and RECREATE the file we just removed.
   const autosaveTimerRef = useRef(null)
+  // Fire the source_edited activation signal at most ONCE per session — the
+  // first real editor keystroke, distinct from the 700ms-debounced item_updated
+  // autosave that fires on every save rather than on the activating edit.
+  const sourceEditedRef = useRef(false)
   // Forward handle to switchFile (defined far below, after its flush deps). Lets
   // the earlier create handler route selection through the one canonical
   // flush-then-select path without a temporal-dead-zone reference.
@@ -1225,6 +1229,10 @@ export default function App({ appId, token }) {
   const handleEditorChange = useCallback((value) => {
     setFileContent(value)
     setFileDirty(true)
+    if (!sourceEditedRef.current) {
+      sourceEditedRef.current = true
+      signal('source_edited', {})
+    }
     if (selectedPath) {
       setFileCache((prev) => ({ ...prev, [selectedPath]: value }))
     }
