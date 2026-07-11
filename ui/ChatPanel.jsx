@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { signal } from '../analytics.js'
 
 function bootstrapPrompt() {
   return [
@@ -54,6 +55,7 @@ export function ChatPanel({
         const fn = getContextRef.current
         return fn ? fn() : null
       },
+      onMessageSent: () => signal('agent_prompt_sent', {}),
       onTurnDone: () => { if (onFilesRef.current) onFilesRef.current() },
       onError: ({ error }) => { setError(typeof error === 'string' ? error : 'Embedded chat reported an error.') },
     }).then((nextHandle) => {
