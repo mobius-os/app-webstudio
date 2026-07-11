@@ -7,15 +7,17 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { resolveEsbuild, sharedReactAliases } from './esbuild-path.mjs'
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
-const esbuild = fileURLToPath(new URL('../node_modules/.bin/esbuild', import.meta.url))
+const esbuild = resolveEsbuild(import.meta.url)
 mkdirSync(new URL('./.build/', import.meta.url), { recursive: true })
 execFileSync(esbuild, [
   '--bundle',
   '--format=esm',
   '--jsx=automatic',
   '--platform=node',
+  ...sharedReactAliases(import.meta.url),
   '--alias:@codemirror/state=./tests/runtime-lib-stub.mjs',
   '--alias:@codemirror/view=./tests/runtime-lib-stub.mjs',
   '--alias:@codemirror/commands=./tests/runtime-lib-stub.mjs',

@@ -1,23 +1,24 @@
 // Unit tests for the preview's link policy and the first-load file pick.
 // The functions under test are pure module-level exports of index.jsx, so the
 // whole app is bundled once (esbuild, platform=node) and imported. Everything
-// resolves from THIS repo's own node_modules after `npm install`: esbuild and
-// react are devDependencies, and @codemirror/* are aliased to a local stub, so
-// the harness is portable on a fresh clone (no host-pinned absolute paths).
+// resolves from THIS repo's own node_modules after `npm install`; in the
+// monorepo workspace it can fall back to the shared Mobius esbuild.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { resolveEsbuild, sharedReactAliases } from './esbuild-path.mjs'
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
-const esbuild = fileURLToPath(new URL('../node_modules/.bin/esbuild', import.meta.url))
+const esbuild = resolveEsbuild(import.meta.url)
 mkdirSync(new URL('./.build/', import.meta.url), { recursive: true })
 execFileSync(esbuild, [
   '--bundle',
   '--format=esm',
   '--jsx=automatic',
   '--platform=node',
+  ...sharedReactAliases(import.meta.url),
   '--alias:@codemirror/state=./tests/runtime-lib-stub.mjs',
   '--alias:@codemirror/view=./tests/runtime-lib-stub.mjs',
   '--alias:@codemirror/commands=./tests/runtime-lib-stub.mjs',
