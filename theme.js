@@ -43,6 +43,11 @@ export const CSS = `
 }
 /* /mobius-ui:Focus */
 
+.ws-sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
 /* mobius-ui:Toolbar v1 — keep in sync with app-latex (unprefixed) */
 /* Two-zone bar: minmax(0,1fr) | auto lets the left zone (drawer toggle +
    filename) flex + truncate while the right zone sizes to its action cluster
@@ -533,7 +538,7 @@ export const CSS = `
 .ws-project-item,
 .ws-project-action {
   width: 100%;
-  min-height: 40px;
+  min-height: 44px;
   padding: 7px 9px;
   border: none;
   border-radius: 8px;
@@ -752,7 +757,7 @@ export const CSS = `
    actions are discoverable without a long-press. */
 .ws-tree-menu-btn {
   flex: 0 0 auto;
-  width: 40px;
+  width: 44px;
   min-height: 44px;
   display: inline-flex;
   align-items: center;
@@ -852,7 +857,7 @@ export const CSS = `
   align-items: center;
   justify-content: center;
   /* Full row-height hit target (the visible dot stays 7px). */
-  width: 40px;
+  width: 44px;
   min-height: 44px;
   border: none;
   border-radius: 8px;

@@ -1720,6 +1720,7 @@ export default function App({ appId, token }) {
   return (
     <div className="ws-root">
       <style>{CSS}</style>
+      <h1 className="ws-sr-only">Web Studio</h1>
       {/* Two-zone top bar: left = drawer toggle + project/open filename,
           right = Build + [Source/Preview toggle]. The grid is 1fr | auto so the left zone
           flexes/truncates and the right zone sizes to its controls.

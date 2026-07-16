@@ -17,25 +17,19 @@ body {
 }
 .page { max-width: 880px; margin: 0 auto; padding: 0 24px 64px; }
 .hero { text-align: center; padding: 72px 0 48px; }
-.badge {
-  display: inline-block;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--brand-soft);
-  color: var(--brand);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0;
-}
 .hero h1 {
-  margin: 18px 0 12px;
+  margin: 0 0 14px;
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
   font-size: clamp(34px, 7vw, 56px);
   line-height: 1.1;
   letter-spacing: 0;
 }
 .lede { max-width: 600px; margin: 0 auto 28px; font-size: 18px; color: var(--muted); }
 .cta {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
   padding: 13px 26px;
   border-radius: 12px;
   background: var(--brand);
@@ -45,6 +39,10 @@ body {
   transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 .cta:hover { transform: translateY(-1px); box-shadow: 0 4px 8px rgba(111, 91, 215, 0.22); }
+.cta:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--brand) 42%, transparent);
+  outline-offset: 3px;
+}
 .features {
   display: grid;
   gap: 18px;
@@ -57,6 +55,20 @@ body {
   border-radius: 16px;
   padding: 22px 22px 24px;
 }
-.card h2 { margin: 0 0 8px; font-size: 19px; }
+.card h2 { margin: 0 0 8px; font-size: 21px; line-height: 1.25; }
 .card p { margin: 0; color: var(--muted); }
 .foot { margin-top: 48px; text-align: center; color: var(--muted); font-size: 14px; }
+@media (max-width: 540px) {
+  .page {
+    padding-left: max(18px, env(safe-area-inset-left));
+    padding-right: max(18px, env(safe-area-inset-right));
+    padding-bottom: max(40px, env(safe-area-inset-bottom));
+  }
+  .hero { padding: max(52px, calc(32px + env(safe-area-inset-top))) 0 36px; text-align: left; }
+  .lede { margin-inline: 0; }
+  .cta { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cta { transition: none; }
+  .cta:hover { transform: none; }
+}
