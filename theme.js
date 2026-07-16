@@ -13,6 +13,12 @@ export const CSS = `
   --ws-scrim: rgba(0, 0, 0, 0.45);
   --ws-scrim-soft: rgba(0, 0, 0, 0.35);
   --ws-shadow: rgba(0, 0, 0, 0.3);
+  --code-comment: var(--muted);
+  --code-string: color-mix(in srgb, #42a85d 76%, var(--text));
+  --code-keyword: color-mix(in srgb, var(--accent) 74%, var(--text));
+  --code-literal: color-mix(in srgb, #1598bc 78%, var(--text));
+  --code-number: color-mix(in srgb, #d77a24 78%, var(--text));
+  --code-tag: color-mix(in srgb, #d94e63 76%, var(--text));
   background: var(--bg, #0d0d0d);
   color: var(--text, #ececec);
   font-family: var(--font, Inter, ui-sans-serif, system-ui, sans-serif);
@@ -1240,6 +1246,64 @@ export const CSS = `
   white-space: nowrap;
 }
 /* /mobius-ui:SyncPill */
+
+/* mobius-ui:Desktop v1 — match LaTeX's large-screen workspace. The file tree
+   becomes a persistent rail and source + rendered site share the main row;
+   chat remains a resizable dock beneath the working area. */
+@media (min-width: 860px) {
+  .ws-body {
+    display: grid;
+    grid-template-columns: 264px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto auto;
+  }
+  .ws-body--chat-open {
+    grid-template-rows: minmax(0, 1fr) auto
+      clamp(
+        var(--ws-chat-pane-min, 74px),
+        calc(var(--ws-chat-ratio, 0.5) * 100%),
+        calc(100% - var(--ws-chat-pane-min, 74px))
+      );
+  }
+  .ws-file-drawer--pinned {
+    position: static;
+    grid-column: 1;
+    grid-row: 1 / -1;
+    width: auto;
+    max-width: none;
+    transform: none;
+    border-right: 1px solid var(--border);
+  }
+  .ws-content { grid-column: 2; grid-row: 1; }
+  .ws-chat-divider { grid-column: 2; grid-row: 2; }
+  .ws-chat-panel { grid-column: 2; grid-row: 3; height: auto; }
+
+  .ws-split {
+    display: flex;
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+  }
+  .ws-split-editor {
+    flex: 0 1 620px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .ws-split-preview {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    background: var(--surface2, var(--surface));
+  }
+  .ws-preview-note, .ws-build-error {
+    max-width: 760px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
 
 /* mobius-ui:ReducedMotion v1 -- honor the OS reduce-motion setting */
 @media (prefers-reduced-motion: reduce) {

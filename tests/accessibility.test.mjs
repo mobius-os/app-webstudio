@@ -11,6 +11,6 @@ test('prompt modal gives its response field an accessible name', () => {
 })
 
 test('closed file navigation is removed from keyboard and accessibility navigation', () => {
-  assert.match(nav, /aria-hidden=\{!open\}/)
-  assert.match(nav, /inert=\{!open \? true : undefined\}/)
+  assert.match(nav, /aria-hidden=\{!shown\}/)
+  assert.match(nav, /inert=\{!shown \? true : undefined\}/)
 })

@@ -20,7 +20,9 @@ export function FileNavPanel({
   onSwitchProject, onNewProject, onRenameProject, onDeleteProject,
   renamingId, onCommitProjectRename, onCancelProjectRename,
   publishedUrl, publishing, buildStatus, canPublish, onPublish, onUnpublish,
+  pinned = false,
 }) {
+  const shown = open || pinned
   const root = useMemo(() => buildTree(files), [files])
   const treeRef = useRef(null)
   const prevOpenRef = useRef(open)
@@ -42,9 +44,9 @@ export function FileNavPanel({
   const dragStart = useRef(null) // { x, y } or null
 
   const onDrawerTouchStart = useCallback((e) => {
-    if (!open || e.touches.length !== 1) return
+    if (pinned || !open || e.touches.length !== 1) return
     dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-  }, [open])
+  }, [open, pinned])
 
   const onDrawerTouchMove = useCallback((e) => {
     if (!dragStart.current || e.touches.length !== 1) return
@@ -118,6 +120,7 @@ export function FileNavPanel({
   }, [focusTreeItem, selectedPath, treeItems])
 
   useEffect(() => {
+    if (pinned) { prevOpenRef.current = open; return }
     const wasOpen = prevOpenRef.current
     prevOpenRef.current = open
     if (open && !wasOpen) {
@@ -127,7 +130,7 @@ export function FileNavPanel({
     if (!open && wasOpen) {
       returnFocusRef?.current?.focus?.()
     }
-  }, [focusSelectedOrFirst, open, returnFocusRef])
+  }, [focusSelectedOrFirst, open, returnFocusRef, pinned])
 
   const handleTreeFocus = useCallback((event) => {
     if (event.target === treeRef.current) focusSelectedOrFirst()
@@ -194,16 +197,16 @@ export function FileNavPanel({
   return (
     <>
       <div
-        className={`ws-drawer-scrim ${open ? 'ws-drawer-scrim--open' : ''}`}
+        className={`ws-drawer-scrim ${open && !pinned ? 'ws-drawer-scrim--open' : ''}`}
         onClick={onClose}
         aria-hidden="true"
       />
       <aside
         ref={drawerRef}
-        className={`ws-file-drawer ${open ? 'ws-file-drawer--open' : ''}`}
+        className={`ws-file-drawer ${open ? 'ws-file-drawer--open' : ''} ${pinned ? 'ws-file-drawer--pinned' : ''}`}
         aria-label="File tree"
-        aria-hidden={!open}
-        inert={!open ? true : undefined}
+        aria-hidden={!shown}
+        inert={!shown ? true : undefined}
         onTouchStart={onDrawerTouchStart}
         onTouchMove={onDrawerTouchMove}
         onTouchEnd={onDrawerTouchEnd}

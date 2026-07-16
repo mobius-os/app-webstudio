@@ -181,6 +181,21 @@ export default function App({ appId, token }) {
   // Viewer mode, toggled by the [Source | Preview] segmented control. 'source'
   // shows the editable CodeMirror source; 'preview' shows the MAIN page's built site.
   const [viewMode, setViewMode] = useState('source')
+  // Match LaTeX's responsive workspace: phones keep the single-pane toggle,
+  // while larger screens pin the file rail and show source + preview together.
+  const [isWide, setIsWide] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(min-width: 860px)').matches
+      : false
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const mq = window.matchMedia('(min-width: 860px)')
+    const onChange = (event) => setIsWide(event.matches)
+    setIsWide(mq.matches)
+    mq.addEventListener?.('change', onChange)
+    return () => mq.removeEventListener?.('change', onChange)
+  }, [])
   // The designated MAIN page — the HTML the Preview renders. Persisted in
   // main.json and defaulted (below) to the first .html (preferring
   // files/index.html). null until the index loads + a default is resolved.
@@ -1636,27 +1651,7 @@ export default function App({ appId, token }) {
     )
   }
 
-  // The main content area — source editor OR a viewer, toggled.
-  function renderMain() {
-    if (!selectedPath) {
-      return (
-        <div className="ws-preview-empty">
-          <div className="ws-preview-empty-title">Web Studio</div>
-          <div className="ws-preview-empty-body">
-            Open the file drawer to pick a file.
-          </div>
-        </div>
-      )
-    }
-    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'].includes(selectedExt)) {
-      return <ImagePreview storage={storage} path={selectedPath} />
-    }
-    // Preview mode shows the MAIN page's built site, so it is only rendered
-    // when the OPEN file IS the main page — matching showHtmlControls, so the
-    // preview never paints a different page than the one on screen.
-    if (selectedPath === mainPath && viewMode === 'preview') {
-      return renderPreviewView()
-    }
+  function renderEditor() {
     if (fileLoading) return <div className="ws-preview-note">Loading source…</div>
     if (fileError) return <div className="ws-preview-note">{fileError}</div>
     // Managed .json files are shown read-only.
@@ -1685,6 +1680,37 @@ export default function App({ appId, token }) {
         onChange={handleEditorChange}
       />
     )
+  }
+
+  // The main content area follows LaTeX's responsive contract. On desktop a
+  // source file sits beside the main site's render; on mobile the main HTML
+  // page keeps the compact Source / Preview toggle.
+  function renderMain() {
+    if (!selectedPath) {
+      return (
+        <div className="ws-preview-empty">
+          <div className="ws-preview-empty-title">Web Studio</div>
+          <div className="ws-preview-empty-body">
+            Open the file drawer to pick a file.
+          </div>
+        </div>
+      )
+    }
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'].includes(selectedExt)) {
+      return <ImagePreview storage={storage} path={selectedPath} />
+    }
+    if (isWide && mainPath && isTextProjectPath(selectedPath)) {
+      return (
+        <div className="ws-split">
+          <div className="ws-split-editor">{renderEditor()}</div>
+          <div className="ws-split-preview">{renderPreviewView()}</div>
+        </div>
+      )
+    }
+    // On a phone, Preview is only offered while the main page is open, so the
+    // single pane never silently swaps to a different file than the title says.
+    if (selectedPath === mainPath && viewMode === 'preview') return renderPreviewView()
+    return renderEditor()
   }
 
   // The Preview view + Build always operate on the MAIN page. We therefore
@@ -1761,21 +1787,8 @@ export default function App({ appId, token }) {
           </div>
         </div>
         <div className="ws-top-zone ws-top-zone--right">
-          {showHtmlControls && (
+          {showHtmlControls && !isWide && (
             <>
-              <button
-                className="ws-toolbar-btn ws-toolbar-btn--primary"
-                onClick={handleBuild}
-                disabled={build.buildStatus === 'building'}
-                aria-label={build.buildStatus === 'building' ? 'Building…' : 'Build'}
-                title={build.buildStatus === 'building'
-                  ? 'Building…'
-                  : `Build ${mainPath.replace(/^files\//, '')}`}
-              >
-                {build.buildStatus === 'building'
-                  ? <BuildingIndicator size={20} />
-                  : <PlayIcon size={20} />}
-              </button>
               {/* Icon-only [Source | Preview] toggle. role=group + aria-pressed exposes
                   the active segment to assistive tech; title + aria-label name the action. */}
               <div className="ws-seg-toggle" role="group" aria-label="View">
@@ -1802,6 +1815,21 @@ export default function App({ appId, token }) {
               </div>
             </>
           )}
+          {mainPath && (isWide || showHtmlControls) && (
+            <button
+              className="ws-toolbar-btn ws-toolbar-btn--primary"
+              onClick={handleBuild}
+              disabled={build.buildStatus === 'building'}
+              aria-label={build.buildStatus === 'building' ? 'Building…' : 'Build'}
+              title={build.buildStatus === 'building'
+                ? 'Building…'
+                : `Build ${mainPath.replace(/^files\//, '')}`}
+            >
+              {build.buildStatus === 'building'
+                ? <BuildingIndicator size={20} />
+                : <PlayIcon size={20} />}
+            </button>
+          )}
           {/* Chat toggle — the embedded agent chat is core, always available
               (not project-specific, so it stays in the bar, not the drawer). */}
           <button
@@ -1820,7 +1848,10 @@ export default function App({ appId, token }) {
       <div
         ref={bodyRef}
         className={chatOpen ? 'ws-body ws-body--chat-open' : 'ws-body'}
-        style={chatOpen ? { '--ws-chat-ratio': chatRatio } : undefined}
+        style={chatOpen ? {
+          '--ws-chat-ratio': chatRatio,
+          '--ws-chat-pane-min': `${CHAT_PANE_MIN_PX}px`,
+        } : undefined}
       >
         <FileNavPanel
           appId={appId}
@@ -1857,6 +1888,7 @@ export default function App({ appId, token }) {
           canPublish={build.buildStatus === 'done' && !!(mainPath && build.entryByDoc[mainPath]?.entry)}
           onPublish={handlePublish}
           onUnpublish={handleUnpublish}
+          pinned={isWide}
         />
         {/* ws-content (its sandboxed preview iframe + CodeMirror) MUST render
             unconditionally at this stable position — never inside a conditional
