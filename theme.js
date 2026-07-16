@@ -183,8 +183,8 @@ export const CSS = `
   touch-action: manipulation;
 }
 .ws-toolbar-btn--primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-hover, var(--accent));
+  border-color: var(--accent-hover, var(--accent));
   color: var(--accent-fg);
 }
 .ws-toolbar-btn:disabled {
@@ -331,8 +331,8 @@ export const CSS = `
   min-height: 44px;
   padding: 10px 22px;
   border-radius: 10px;
-  border: 1px solid var(--accent);
-  background: var(--accent);
+  border: 1px solid var(--accent-hover, var(--accent));
+  background: var(--accent-hover, var(--accent));
   color: var(--accent-fg);
   font-family: var(--font);
   font-size: 14px;
@@ -1176,9 +1176,9 @@ export const CSS = `
 }
 .ws-modal-btn:active { opacity: 0.8; }
 .ws-modal-btn--primary {
-  background: var(--accent);
+  background: var(--accent-hover, var(--accent));
   color: var(--accent-fg);
-  border-color: var(--accent);
+  border-color: var(--accent-hover, var(--accent));
 }
 .ws-modal-btn--danger {
   background: var(--danger);

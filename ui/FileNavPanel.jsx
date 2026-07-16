@@ -203,6 +203,7 @@ export function FileNavPanel({
         className={`ws-file-drawer ${open ? 'ws-file-drawer--open' : ''}`}
         aria-label="File tree"
         aria-hidden={!open}
+        inert={!open ? true : undefined}
         onTouchStart={onDrawerTouchStart}
         onTouchMove={onDrawerTouchMove}
         onTouchEnd={onDrawerTouchEnd}
