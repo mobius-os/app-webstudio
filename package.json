@@ -1,6 +1,6 @@
 {
   "name": "app-webstudio",
-  "version": "0.12.8",
+  "version": "0.12.9",
   "private": true,
   "description": "Web Studio \u2014 Mobius catalog app. Dev tooling only; the app itself ships via mobius.json source_files.",
   "license": "MIT",

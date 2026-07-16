@@ -95,6 +95,8 @@ export function ModalView({ state }) {
               ref={inputRef}
               className="ws-modal-input"
               type="text"
+              aria-label={state.title}
+              name="modal_response"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder={state.placeholder}
