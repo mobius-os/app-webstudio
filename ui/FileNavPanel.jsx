@@ -283,9 +283,9 @@ export function FileNavPanel({
         <div
           ref={treeRef}
           className="ws-drawer-tree"
-          role="tree"
+          role={files.length > 0 ? 'tree' : undefined}
           aria-label="Project files"
-          tabIndex={0}
+          tabIndex={files.length > 0 ? 0 : undefined}
           onFocus={handleTreeFocus}
           onKeyDown={handleTreeKeyDown}
         >

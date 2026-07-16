@@ -14,3 +14,8 @@ test('closed file navigation is removed from keyboard and accessibility navigati
   assert.match(nav, /aria-hidden=\{!shown\}/)
   assert.match(nav, /inert=\{!shown \? true : undefined\}/)
 })
+
+test('the file tree role is only exposed when it owns tree items', () => {
+  assert.match(nav, /role=\{files\.length > 0 \? 'tree' : undefined\}/)
+  assert.match(nav, /tabIndex=\{files\.length > 0 \? 0 : undefined\}/)
+})
