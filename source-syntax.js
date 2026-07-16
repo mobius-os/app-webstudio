@@ -3,7 +3,7 @@ const SOURCE_EXTENSIONS = new Set([
   'htm', 'svg', 'xml', 'py', 'sh', 'bash', 'yaml', 'yml', 'toml', 'sql',
 ])
 
-const SOURCE_TOKEN_RE = /(<!--[\s\S]*?-->|\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|\b(import|from|as|export|default|const|let|var|function|return|if|else|for|while|switch|case|break|continue|try|catch|finally|throw|new|class|extends|async|await|yield|typeof|instanceof|in|of|def|lambda|with|elif|fi|then|select|insert|update|delete|create|where|join|order|group|by)\b|\b(true|false|null|undefined|None|True|False)\b|\b(0x[\da-fA-F]+|\d+(?:\.\d+)?)|(<\/?[A-Za-z][\w.-]*)/g
+const SOURCE_TOKEN_RE = /(<!--[\s\S]*?-->|\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|\b(import|from|as|export|default|const|let|var|function|return|if|else|for|while|switch|case|break|continue|try|catch|finally|throw|new|class|extends|async|await|yield|typeof|instanceof|in|of|def|lambda|with|elif|fi|then|select|insert|update|delete|create|where|join|order|group|by)\b|\b(true|false|null|undefined|None|True|False)\b|(?<!#)\b(0x[\da-fA-F]+|\d+(?:\.\d+)?)|(<\/?[A-Za-z][\w.-]*)/g
 
 export function sourceKind(path) {
   const name = String(path || '').split('/').pop() || ''

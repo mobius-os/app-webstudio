@@ -15,3 +15,9 @@ test('highlights HTML tags, strings, and comments', () => {
     'cm-syn-comment', 'cm-syn-tag', 'cm-syn-keyword', 'cm-syn-string', 'cm-syn-tag',
   ])
 })
+
+test('digit-leading css hex colors are not number tokens, units still are', () => {
+  const tokens = sourceTokens('files/styles.css', '.a { color: #1598bc; width: 12px; }')
+  const numbers = tokens.filter((token) => token.className === 'cm-syn-number')
+  assert.deepEqual(numbers.map((token) => token.from), [28])
+})
