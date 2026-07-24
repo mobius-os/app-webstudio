@@ -1253,9 +1253,11 @@ export const CSS = `
 @media (min-width: 860px) {
   .ws-body {
     display: grid;
-    grid-template-columns: 264px minmax(0, 1fr);
+    grid-template-columns: 0 minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto auto;
+    transition: grid-template-columns 0.2s ease;
   }
+  .ws-body--drawer-open { grid-template-columns: 264px minmax(0, 1fr); }
   .ws-body--chat-open {
     grid-template-rows: minmax(0, 1fr) auto
       clamp(
@@ -1270,8 +1272,13 @@ export const CSS = `
     grid-row: 1 / -1;
     width: auto;
     max-width: none;
+    min-width: 0;
     transform: none;
     border-right: 1px solid var(--border);
+  }
+  .ws-body:not(.ws-body--drawer-open) .ws-file-drawer--pinned {
+    visibility: hidden;
+    border-right-color: transparent;
   }
   .ws-content { grid-column: 2; grid-row: 1; }
   .ws-chat-divider { grid-column: 2; grid-row: 2; }
@@ -1285,12 +1292,43 @@ export const CSS = `
     min-width: 0;
   }
   .ws-split-editor {
-    flex: 0 1 620px;
+    flex: 0 0 var(--ws-workspace-editor-width, 50%);
     min-width: 0;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--border);
     overflow: hidden;
+  }
+  .ws-workspace-divider {
+    position: relative;
+    z-index: 2;
+    flex: 0 0 1px;
+    width: 1px;
+    background: var(--border);
+    cursor: ew-resize;
+    touch-action: none;
+    user-select: none;
+  }
+  .ws-workspace-divider::before {
+    content: "";
+    position: absolute;
+    inset: 0 -7px;
+  }
+  .ws-workspace-divider-bar {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 3px;
+    height: 36px;
+    border-radius: 999px;
+    background: var(--muted);
+    opacity: 0;
+    transform: translate(-50%, -50%);
+    transition: opacity 0.14s ease, background 0.14s ease;
+  }
+  .ws-workspace-divider:hover .ws-workspace-divider-bar,
+  .ws-workspace-divider:focus-visible .ws-workspace-divider-bar {
+    opacity: 1;
+    background: var(--accent);
   }
   .ws-split-preview {
     flex: 1 1 0;

@@ -21,6 +21,7 @@ import {
   PROJECT_SYNC_MS,
   SOURCE_AUTOSAVE_MS,
   SOURCE_SYNC_MS,
+  WORKSPACE_PANE_MIN_PX,
 } from './constants.js'
 import { CSS } from './theme.js'
 import {
@@ -104,7 +105,11 @@ export default function App({ appId, token }) {
   const filesRef = useRef(files)
   const [fileCache, setFileCache] = useState(() => cached?.contents || {})
   const [indexLoaded, setIndexLoaded] = useState(false)
-  const [navOpen, setNavOpen] = useState(false)
+  const [navOpen, setNavOpen] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(min-width: 860px)').matches
+      : false
+  )
   const navHandleRef = useRef(null)
   const navOpenRef = useRef(false)
   const chatNavRef = useRef(null)
@@ -182,7 +187,8 @@ export default function App({ appId, token }) {
   // shows the editable CodeMirror source; 'preview' shows the MAIN page's built site.
   const [viewMode, setViewMode] = useState('source')
   // Match LaTeX's responsive workspace: phones keep the single-pane toggle,
-  // while larger screens pin the file rail and show source + preview together.
+  // while larger screens dock the toggleable file rail and show source +
+  // preview together across a draggable divider.
   const [isWide, setIsWide] = useState(() =>
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia('(min-width: 860px)').matches
@@ -196,6 +202,24 @@ export default function App({ appId, token }) {
     mq.addEventListener?.('change', onChange)
     return () => mq.removeEventListener?.('change', onChange)
   }, [])
+  const previousWideRef = useRef(isWide)
+  useEffect(() => {
+    if (previousWideRef.current === isWide) return
+    previousWideRef.current = isWide
+    const handle = navHandleRef.current
+    navHandleRef.current = null
+    try { handle?.close?.() } catch {}
+    navOpenRef.current = isWide
+    setNavOpen(isWide)
+  }, [isWide])
+  const workspaceRef = useRef(null)
+  const [workspaceRatio, setWorkspaceRatio] = useState(() => {
+    try {
+      const value = Number(localStorage.getItem(`webstudio:workspace-ratio:${appId}`))
+      if (value > 0 && value < 1) return value
+    } catch {}
+    return 0.5
+  })
   // The designated MAIN page — the HTML the Preview renders. Persisted in
   // main.json and defaulted (below) to the first .html (preferring
   // files/index.html). null until the index loads + a default is resolved.
@@ -232,6 +256,11 @@ export default function App({ appId, token }) {
     if (typeof localStorage === 'undefined') return
     try { localStorage.setItem(chatRatioKey(appId), String(chatRatio)) } catch {}
   }, [appId, chatRatio])
+
+  useEffect(() => {
+    if (typeof localStorage === 'undefined') return
+    try { localStorage.setItem(`webstudio:workspace-ratio:${appId}`, String(workspaceRatio)) } catch {}
+  }, [appId, workspaceRatio])
 
   useEffect(() => {
     let cancelled = false
@@ -439,6 +468,57 @@ export default function App({ appId, token }) {
     }
   }, [])
 
+  const beginWorkspaceResize = useCallback((event) => {
+    event.preventDefault()
+    const workspace = workspaceRef.current
+    if (!workspace) return
+    const total = workspace.getBoundingClientRect().width
+    if (!total) return
+    const startX = event.clientX
+    const startPx = total * workspaceRatio
+    const divider = event.currentTarget
+    const pointerId = event.pointerId
+    divider.setPointerCapture?.(pointerId)
+    const onMove = (moveEvent) => {
+      const desiredPx = startPx + moveEvent.clientX - startX
+      setWorkspaceRatio(clampChatRatio(desiredPx, total, WORKSPACE_PANE_MIN_PX))
+    }
+    const endDrag = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', endDrag)
+      window.removeEventListener('pointercancel', endDrag)
+      divider.removeEventListener('lostpointercapture', endDrag)
+      try { divider.releasePointerCapture?.(pointerId) } catch {}
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', endDrag)
+    window.addEventListener('pointercancel', endDrag)
+    divider.addEventListener('lostpointercapture', endDrag)
+  }, [workspaceRatio])
+
+  const handleWorkspaceResizeKey = useCallback((event) => {
+    const total = workspaceRef.current?.getBoundingClientRect().width || 0
+    if (!total) return
+    const step = total * 0.05
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      setWorkspaceRatio((ratio) => clampChatRatio(
+        ratio * total - step, total, WORKSPACE_PANE_MIN_PX,
+      ))
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      setWorkspaceRatio((ratio) => clampChatRatio(
+        ratio * total + step, total, WORKSPACE_PANE_MIN_PX,
+      ))
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      setWorkspaceRatio(clampChatRatio(0, total, WORKSPACE_PANE_MIN_PX))
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      setWorkspaceRatio(clampChatRatio(total, total, WORKSPACE_PANE_MIN_PX))
+    }
+  }, [])
+
   useEffect(() => {
     writeFileCache(appId, activeProjectId, files, fileCache, selectedPath)
   }, [appId, activeProjectId, files, fileCache, selectedPath])
@@ -459,17 +539,25 @@ export default function App({ appId, token }) {
   }, [projectsLoaded, indexLoaded, files.length, projects.length])
 
   const closeNav = useCallback(() => {
-    try { navHandleRef.current?.close?.() } catch {}
+    const handle = navHandleRef.current
     navHandleRef.current = null
+    navOpenRef.current = false
+    try { handle?.close?.() } catch {}
     setNavOpen(false)
   }, [])
 
   const openNav = useCallback(async () => {
     if (navOpenRef.current) return
     navOpenRef.current = true
+    if (isWide) {
+      setNavOpen(true)
+      return
+    }
     if (window.mobius?.nav?.open) {
       const handle = window.mobius.nav.open('webstudio-drawer', () => {
+        if (navHandleRef.current !== handle) return
         navHandleRef.current = null
+        navOpenRef.current = false
         setNavOpen(false)
       })
       navHandleRef.current = handle
@@ -477,7 +565,7 @@ export default function App({ appId, token }) {
       if (navHandleRef.current !== handle) return
     }
     setNavOpen(true)
-  }, [])
+  }, [isWide])
   useEffect(() => { openNavRef.current = openNav }, [openNav])
 
   const toggleNav = useCallback(() => {
@@ -1701,8 +1789,26 @@ export default function App({ appId, token }) {
     }
     if (isWide && mainPath && isTextProjectPath(selectedPath)) {
       return (
-        <div className="ws-split">
+        <div
+          ref={workspaceRef}
+          className="ws-split"
+          style={{ '--ws-workspace-editor-width': `${workspaceRatio * 100}%` }}
+        >
           <div className="ws-split-editor">{renderEditor()}</div>
+          <div
+            className="ws-workspace-divider"
+            role="separator"
+            aria-label="Resize source and preview areas"
+            aria-orientation="vertical"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(workspaceRatio * 100)}
+            tabIndex={0}
+            onPointerDown={beginWorkspaceResize}
+            onKeyDown={handleWorkspaceResizeKey}
+          >
+            <span className="ws-workspace-divider-bar" aria-hidden="true" />
+          </div>
           <div className="ws-split-preview">{renderPreviewView()}</div>
         </div>
       )
@@ -1847,7 +1953,7 @@ export default function App({ appId, token }) {
 
       <div
         ref={bodyRef}
-        className={chatOpen ? 'ws-body ws-body--chat-open' : 'ws-body'}
+        className={`${chatOpen ? 'ws-body ws-body--chat-open' : 'ws-body'} ${navOpen ? 'ws-body--drawer-open' : ''}`}
         style={chatOpen ? {
           '--ws-chat-ratio': chatRatio,
           '--ws-chat-pane-min': `${CHAT_PANE_MIN_PX}px`,

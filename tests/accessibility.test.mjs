@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 const modal = readFileSync(new URL('../ui/ModalView.jsx', import.meta.url), 'utf8')
 const nav = readFileSync(new URL('../ui/FileNavPanel.jsx', import.meta.url), 'utf8')
+const app = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 
 test('prompt modal gives its response field an accessible name', () => {
   assert.match(modal, /aria-label=\{state\.title\}/)
@@ -18,4 +19,10 @@ test('closed file navigation is removed from keyboard and accessibility navigati
 test('the file tree role is only exposed when it owns tree items', () => {
   assert.match(nav, /role=\{files\.length > 0 \? 'tree' : undefined\}/)
   assert.match(nav, /tabIndex=\{files\.length > 0 \? 0 : undefined\}/)
+})
+
+test('desktop source and preview split exposes a keyboard-operable vertical separator', () => {
+  assert.match(app, /aria-label="Resize source and preview areas"/)
+  assert.match(app, /aria-orientation="vertical"/)
+  assert.match(app, /onKeyDown=\{handleWorkspaceResizeKey\}/)
 })
