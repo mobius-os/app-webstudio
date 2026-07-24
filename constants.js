@@ -12,6 +12,7 @@ export const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }
 export const CHAT_PILL_MIN_PX = 64
 export const CHAT_DIVIDER_PX = 10
 export const CHAT_PANE_MIN_PX = CHAT_PILL_MIN_PX + CHAT_DIVIDER_PX
+export const WORKSPACE_PANE_MIN_PX = 220
 export const BUILD_POLL_MS = 2000
 export const BUILD_TIMEOUT_MS = 120000
 // How long to let a freshly-written dispatch claim settle before reading it

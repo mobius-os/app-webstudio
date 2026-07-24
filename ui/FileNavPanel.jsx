@@ -22,7 +22,9 @@ export function FileNavPanel({
   publishedUrl, publishing, buildStatus, canPublish, onPublish, onUnpublish,
   pinned = false,
 }) {
-  const shown = open || pinned
+  // A pinned drawer is docked rather than overlaid, but the app-logo toggle
+  // still owns whether it is visible.
+  const shown = open
   const root = useMemo(() => buildTree(files), [files])
   const treeRef = useRef(null)
   const prevOpenRef = useRef(open)

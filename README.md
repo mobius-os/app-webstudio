@@ -4,9 +4,9 @@ A VSCode-shaped website builder for [Möbius](https://github.com/mobius-os). Des
 
 ## Key features
 
-- **Live file tree** — slide-in left drawer with New file, New folder, Upload, and per-file drag-to-move, rename, and delete. Long-press (mobile) or right-click (desktop) opens the same context menu.
+- **Live file tree** — the app icon toggles a docked desktop rail or compact slide-in drawer with New file, New folder, Upload, and per-file drag-to-move, rename, and delete. Long-press (mobile) or right-click (desktop) opens the same context menu.
 - **Source editor** — CodeMirror 6 with history, line-wrap, and tab-indent. Debounced autosave at 700 ms. Only the app's own metadata files (`files-index.json`, `main.json`, `chat_id.json`, `build/status.json`, `build/dispatch.json`) are read-only so the editor can never corrupt them; every file you create under `files/` — including `.json` — is editable source.
-- **Build + preview** — a server-side `build.sh` assembles the whole site under `build/site/`; the preview renders the main HTML page in a sandboxed iframe via `srcdoc` with all assets inlined as blob URLs. The sandbox grants `allow-scripts allow-popups` only — the generated site can never reach the app's storage token or localStorage.
+- **Build + preview** — a server-side `build.sh` assembles the whole site under `build/site/`; the preview renders the main HTML page in a sandboxed iframe via `srcdoc` with all assets inlined as blob URLs. On desktop, drag the source/preview divider (or focus it and use the arrow keys) to rebalance the workspace. The sandbox grants `allow-scripts allow-popups` only — the generated site can never reach the app's storage token or localStorage.
 - **Embedded agent chat** — powered by `window.mobius.chat`; the agent has `build.sh`, the Möbius storage API, and the embedded-app-agent skill. A draggable resizer splits the editor and the chat panel. The drag survives the pointer crossing the preview iframe (pointer capture).
 - **Offline-resilient editing** — file index and last-edited file content are stored in localStorage. Reads are cache-first offline; writes queue and drain when back online (via `window.mobius.storage`). Sync is silent while online; a plain "Offline" pill appears only when you lose connectivity.
 
@@ -77,6 +77,7 @@ Install into a running Möbius instance via the App Store URL or
 
 | Version | Changes |
 |---------|---------|
+| 0.13.4 | Desktop file drawer can be toggled; source/preview split is draggable and keyboard-adjustable. |
 | 0.12.4 | Reliability + observability pass. Switching files no longer lets a pending autosave overwrite the newly selected file; user-created `.json` files under `files/` are editable source (only app metadata stays read-only); builds serialize app-wide via a dispatch claim so concurrent builds can't silently time out; the offline pill is mounted (silent when healthy); renamed main pages ask for a rebuild instead of a phantom preview; builds prune `node_modules`; folder upload is reachable; the choose modal resolves consistently on dismiss. Adds app signals for Reflection and a portable `npm install && npm test`. Touch-target (44px), radius-scale, and theme-token cleanups. |
 | 0.12.3 | Modularized: split `index.jsx` into a `source_files` module tree. |
 | 0.12.0–0.12.2 | Data-loss + a11y fixes from the closing review; preview no longer black-flashes when toggling chat; drag/drop + folder-collision guards; inline set-main. |
