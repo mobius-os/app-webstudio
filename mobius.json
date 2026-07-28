@@ -39,7 +39,8 @@
       "@codemirror/state",
       "@codemirror/view",
       "@codemirror/commands",
-      "@codemirror/language"
+      "@codemirror/language",
+      "@openai/apps-sdk-ui/components/Icon"
     ],
     "esm_deps": []
   },

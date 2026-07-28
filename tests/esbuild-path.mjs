@@ -38,3 +38,11 @@ export function sharedReactAliases(importMetaUrl) {
     `--alias:react=${sharedReact}`,
   ]
 }
+
+export function sharedAppsSdkAliases(importMetaUrl) {
+  const shared = sharedNodeModules(importMetaUrl)
+  if (!shared) return []
+  const iconEntry = `${shared}/@openai/apps-sdk-ui/dist/es/components/Icon/index.js`
+  if (!existsSync(iconEntry)) return []
+  return [`--alias:@openai/apps-sdk-ui/components/Icon=${iconEntry}`]
+}
