@@ -9,6 +9,8 @@ test('embedded chat offers contextual guidance instead of prewritten prompts', (
   assert.match(appSource, /const guidance = useMemo/)
   assert.match(appSource, /guidance=\{guidance\}/)
   assert.match(chatSource, /guidance: guidanceRef\.current/)
+  assert.match(chatSource, /chatHandleRef\.current\?\.setGuidance\?\.\(guidance\)/)
+  assert.match(chatSource, /\.setGuidance\?\.\(guidanceRef\.current\)/)
   assert.doesNotMatch(appSource, /\bquickActions\b/)
   assert.doesNotMatch(chatSource, /\bquickActions\b/)
 })

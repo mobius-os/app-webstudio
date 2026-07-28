@@ -28,7 +28,11 @@ export function ChatPanel({
   const onFilesRef = useRef(onFilesMaybeChanged)
   useEffect(() => { onFilesRef.current = onFilesMaybeChanged }, [onFilesMaybeChanged])
   const guidanceRef = useRef(guidance)
-  useEffect(() => { guidanceRef.current = guidance }, [guidance])
+  const chatHandleRef = useRef(null)
+  useEffect(() => {
+    guidanceRef.current = guidance
+    chatHandleRef.current?.setGuidance?.(guidance)
+  }, [guidance])
   const getContextRef = useRef(getContext)
   useEffect(() => { getContextRef.current = getContext }, [getContext])
   const systemPrompt = useMemo(() => bootstrapPrompt(), [])
@@ -64,12 +68,15 @@ export function ChatPanel({
         return
       }
       handle = nextHandle
+      chatHandleRef.current = nextHandle
+      nextHandle.setGuidance?.(guidanceRef.current)
     }).catch((e) => {
       if (!disposed) setError(e.message || 'Could not mount embedded chat.')
     })
 
     return () => {
       disposed = true
+      if (chatHandleRef.current === handle) chatHandleRef.current = null
       if (handle) handle.destroy()
     }
   }, [storage, systemPrompt, projectId, persistKey])
