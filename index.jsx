@@ -1829,15 +1829,13 @@ export default function App({ appId, token }) {
   const showHtmlControls = !!mainPath && selectedPath === mainPath
   const openName = selectedPath ? selectedPath.replace(/^files\//, '') : null
 
-  const quickActions = useMemo(() => {
-    const actions = []
-    if (build.buildStatus === 'error') {
-      actions.push({ label: 'Fix the build', prompt: 'Fix the build errors.' })
-    }
-    actions.push({ label: 'Improve the design', prompt: 'Improve the visual design of the site.' })
-    actions.push({ label: 'Add a page', prompt: 'Add a new page to the site.' })
-    return actions
-  }, [build.buildStatus])
+  // A short informational line for the embedded chat's empty state — what the
+  // agent can do, calling out a failing build when there is one.
+  const guidance = useMemo(() => (
+    build.buildStatus === 'error'
+      ? 'The build is failing. Ask the agent to fix it, or tell it how you want to change the site.'
+      : 'Tell the agent how to build or change your site — improve the design, add a page, or restructure what you have.'
+  ), [build.buildStatus])
 
   const getContext = useCallback(() => {
     return Promise.resolve({
@@ -2026,7 +2024,7 @@ export default function App({ appId, token }) {
               projectId={activeProjectId}
               persistKey={`${activePrefix}chat_id.json`}
               onFilesMaybeChanged={onFilesMaybeChanged}
-              quickActions={quickActions}
+              guidance={guidance}
               getContext={getContext}
             />
           </>

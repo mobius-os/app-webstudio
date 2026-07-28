@@ -17,7 +17,7 @@ export function ChatPanel({
   appId, token, storage,
   projectId, persistKey,
   onFilesMaybeChanged,
-  quickActions, getContext,
+  guidance, getContext,
 }) {
   const mountRef = useRef(null)
   const [error, setError] = useState(null)
@@ -27,8 +27,12 @@ export function ChatPanel({
   // the chat iframe — destroying a streaming turn mid-flight.
   const onFilesRef = useRef(onFilesMaybeChanged)
   useEffect(() => { onFilesRef.current = onFilesMaybeChanged }, [onFilesMaybeChanged])
-  const quickActionsRef = useRef(quickActions)
-  useEffect(() => { quickActionsRef.current = quickActions }, [quickActions])
+  const guidanceRef = useRef(guidance)
+  const chatHandleRef = useRef(null)
+  useEffect(() => {
+    guidanceRef.current = guidance
+    chatHandleRef.current?.setGuidance?.(guidance)
+  }, [guidance])
   const getContextRef = useRef(getContext)
   useEffect(() => { getContextRef.current = getContext }, [getContext])
   const systemPrompt = useMemo(() => bootstrapPrompt(), [])
@@ -50,7 +54,7 @@ export function ChatPanel({
       title: 'Web Studio',
       systemPrompt,
       picker: true,
-      quickActions: quickActionsRef.current,
+      guidance: guidanceRef.current,
       getContext: () => {
         const fn = getContextRef.current
         return fn ? fn() : null
@@ -64,12 +68,15 @@ export function ChatPanel({
         return
       }
       handle = nextHandle
+      chatHandleRef.current = nextHandle
+      nextHandle.setGuidance?.(guidanceRef.current)
     }).catch((e) => {
       if (!disposed) setError(e.message || 'Could not mount embedded chat.')
     })
 
     return () => {
       disposed = true
+      if (chatHandleRef.current === handle) chatHandleRef.current = null
       if (handle) handle.destroy()
     }
   }, [storage, systemPrompt, projectId, persistKey])
