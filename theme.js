@@ -224,20 +224,21 @@ export const CSS = `
   display: inline-flex;
   flex: 0 0 auto;
   gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
+  height: 44px;
+  border: 0;
   border-radius: 10px;
   background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 .ws-seg-btn {
+  box-sizing: border-box;
   width: 44px;
   height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   /* Borderless segments inside the pill wrapper; the wrapper owns the
-     outer border. Slightly tighter radius than the wrapper so the active
-     fill nests cleanly inside the 2px track. */
+     inset outline. */
   border: none;
   border-radius: 8px;
   background: transparent;
