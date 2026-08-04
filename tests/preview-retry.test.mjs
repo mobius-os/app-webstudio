@@ -4,32 +4,13 @@
 // in parallel processes, so sharing one .build path would race the bundles.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { resolveEsbuild, sharedAppsSdkAliases, sharedReactAliases } from './esbuild-path.mjs'
+import { bundleModule, runtimeLibStubs } from './bundle.mjs'
 
-const repoRoot = fileURLToPath(new URL('..', import.meta.url))
-const esbuild = resolveEsbuild(import.meta.url)
-mkdirSync(new URL('./.build/', import.meta.url), { recursive: true })
-execFileSync(esbuild, [
-  '--bundle',
-  '--format=esm',
-  '--jsx=automatic',
-  '--platform=node',
-  ...sharedReactAliases(import.meta.url),
-  ...sharedAppsSdkAliases(import.meta.url),
-  '--alias:@codemirror/state=./tests/runtime-lib-stub.mjs',
-  '--alias:@codemirror/view=./tests/runtime-lib-stub.mjs',
-  '--alias:@codemirror/commands=./tests/runtime-lib-stub.mjs',
-  'index.jsx',
-  '--outfile=tests/.build/index-retry.mjs',
-], {
-  cwd: repoRoot,
-  stdio: 'pipe',
+const { readWithRetry } = await bundleModule({
+  entry: 'index.jsx',
+  outfile: 'tests/.build/index-retry.mjs',
+  alias: runtimeLibStubs,
 })
-
-const { readWithRetry } = await import('./.build/index-retry.mjs')
 
 // Injectable fake sleep: records the requested delays, resolves immediately.
 function fakeSleep() {

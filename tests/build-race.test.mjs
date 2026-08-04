@@ -5,25 +5,12 @@
 // files in parallel processes, so a shared .build path would race the bundles.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { resolveEsbuild } from './esbuild-path.mjs'
+import { bundleModule } from './bundle.mjs'
 
-const repoRoot = fileURLToPath(new URL('..', import.meta.url))
-const esbuild = resolveEsbuild(import.meta.url)
-mkdirSync(new URL('./.build/', import.meta.url), { recursive: true })
-execFileSync(esbuild, [
-  '--bundle',
-  '--format=esm',
-  '--platform=node',
-  'domain.js',
-  '--outfile=tests/.build/domain-race.mjs',
-], { cwd: repoRoot, stdio: 'pipe' })
-
-const { foreignClaimBlocks, claimIsOurs, buildTargetSuperseded } = await import(
-  './.build/domain-race.mjs'
-)
+const { foreignClaimBlocks, claimIsOurs, buildTargetSuperseded } = await bundleModule({
+  entry: 'domain.js',
+  outfile: 'tests/.build/domain-race.mjs',
+})
 
 const TIMEOUT = 120000
 

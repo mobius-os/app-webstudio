@@ -62,13 +62,18 @@ Vague prompts like "build me a portfolio site" or "add a dark-mode toggle" are e
 
 Web Studio is a multi-file React mini-app: `index.jsx` is the entry and the
 module tree is declared in `mobius.json`'s `source_files` (the installer fetches
-each file and esbuild bundles from the entry). To iterate locally:
+each file and Rolldown bundles from the entry). To iterate locally:
 
 ```bash
-npm install     # esbuild + react — dev tooling only; the app ships via source_files
+npm install     # react — dev tooling only; the app ships via source_files
 npm run smoke   # compile-smoke the whole module tree (no output = success)
 npm test        # pure-logic unit tests: preview link policy, retry, json-kind, resize
 ```
+
+The smoke check and the tests bundle with Rolldown, which ships in the shell's
+frontend rather than on npm: point `MOBIUS_FRONTEND_NODE_MODULES` at an
+installed `mobius/frontend/node_modules` (CI does this from a `.mobius`
+checkout).
 
 Install into a running Möbius instance via the App Store URL or
 `POST /api/apps/install`.
