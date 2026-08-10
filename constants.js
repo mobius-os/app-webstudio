@@ -5,7 +5,6 @@ export const BINARY_FILE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 's
 export const LONG_PRESS_MS = 500
 export const LONG_PRESS_SLOP = 10
 export const FILE_CONTENT_CACHE_LIMIT = 20
-export const FILE_CACHE_VERSION = 1
 export const CHAT_OPEN_VERSION = 1
 export const CHAT_RATIO_VERSION = 1
 export const DEFAULT_PROJECT = { id: 'default', name: 'Project 1' }

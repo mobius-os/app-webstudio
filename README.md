@@ -8,7 +8,7 @@ A VSCode-shaped website builder for [Möbius](https://github.com/mobius-os). Des
 - **Source editor** — CodeMirror 6 with history, line-wrap, and tab-indent. Debounced autosave at 700 ms. Only the app's own metadata files (`files-index.json`, `main.json`, `chat_id.json`, `build/status.json`, `build/dispatch.json`) are read-only so the editor can never corrupt them; every file you create under `files/` — including `.json` — is editable source.
 - **Build + preview** — a server-side `build.sh` assembles the whole site under `build/site/`; the preview renders the main HTML page in a sandboxed iframe via `srcdoc` with all assets inlined as blob URLs. On desktop, drag the source/preview divider (or focus it and use the arrow keys) to rebalance the workspace. The sandbox grants `allow-scripts allow-popups` only — the generated site can never reach the app's storage token or localStorage.
 - **Embedded agent chat** — powered by `window.mobius.chat`; the agent has `build.sh`, the Möbius storage API, and the embedded-app-agent skill. A draggable resizer splits the editor and the chat panel. The drag survives the pointer crossing the preview iframe (pointer capture).
-- **Offline-resilient editing** — file index and last-edited file content are stored in localStorage. Reads are cache-first offline; writes queue and drain when back online (via `window.mobius.storage`). Sync is silent while online; a plain "Offline" pill appears only when you lose connectivity.
+- **Offline-resilient editing** — the Möbius storage runtime owns the durable cache and queued writes; Web Studio keeps only a bounded in-memory buffer for recently opened text files. Sync is silent while online; a plain "Offline" pill appears only when you lose connectivity.
 
 ## Install
 
@@ -38,7 +38,7 @@ which are editable text or binary — including a user's own `files/data.json`.
 |------|------|---------|
 | `files/<path>` | text or binary | Website source files: `index.html`, `style.css`, `app.js`, images, fonts, and any `.json` you author — all editable source. |
 | `projects.json` | JSON array | The project list (`[{id, name, createdAt}]`), stored at the app root (shared across projects). |
-| `files-index.json` | JSON array | Canonical ordered list of every path under `files/`. The storage API *does* expose a listing endpoint (`storage.list()`), but Web Studio still maintains this index as the ordered source of truth (a migration to enumeration is a future step); the agent keeps it in sync when it creates or deletes files. |
+| `files-index.json` | JSON array | Canonical ordered list of every path under `files/`. UI and agent changes merge with conditional writes, and an absent index is reconstructed from `storage.list()` rather than from a guessed filename. |
 | `main.json` | JSON `{path: string}` | The designated main HTML page. The Preview renders this page; Build assembles the whole site with this page as the entry. Defaults to `files/index.html`. |
 | `build/target.txt` | text | The HTML entry path written by the app before kicking `build.sh`, so the script knows which page is the root. |
 | `build/status.json` | JSON | Build verdict written by `build.sh`: `{status: "done"\|"error", entry: string, target: string, log?: string, built_at?: string}`. The app polls this at 2-second intervals until a verdict appears or a 2-minute timeout elapses. |
@@ -56,6 +56,13 @@ The embedded agent (`window.mobius.chat`) runs in its own chat thread persisted 
 3. It can trigger `build.sh` via `POST /api/apps/<id>/run-job` to assemble the site.
 4. The app polls `build/status.json` and flips the viewer to Preview when a `done` verdict lands.
 
+Text and binary files keep their native storage kinds instead of passing through
+one universal document model. Live text subscriptions make agent edits appear in
+an open editor; shared list documents (`files-index.json` and `projects.json`)
+use compare-and-swap retries so another tab or agent cannot be erased by a late
+whole-array write. This is collaboration-safe convergence, not multi-user cursor
+presence or character-level coauthoring.
+
 Vague prompts like "build me a portfolio site" or "add a dark-mode toggle" are enough. The agent handles file creation, HTML/CSS/JS edits, asset placement, and builds without additional instructions.
 
 ## Dev loop
@@ -70,10 +77,9 @@ npm run smoke   # compile-smoke the whole module tree (no output = success)
 npm test        # pure-logic unit tests: preview link policy, retry, json-kind, resize
 ```
 
-The smoke check and the tests bundle with Rolldown, which ships in the shell's
-frontend rather than on npm: point `MOBIUS_FRONTEND_NODE_MODULES` at an
-installed `mobius/frontend/node_modules` (CI does this from a `.mobius`
-checkout).
+The smoke check and tests use the shell's Rolldown install. They auto-discover a
+live `/data/platform` checkout or a sibling `.mobius` checkout; CI can set
+`MOBIUS_FRONTEND_NODE_MODULES` explicitly.
 
 Install into a running Möbius instance via the App Store URL or
 `POST /api/apps/install`.

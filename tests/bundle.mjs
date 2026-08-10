@@ -19,6 +19,8 @@ export function sharedNodeModules() {
   if (env && existsSync(env)) return env
   const sibling = join(repoRoot, '.mobius', 'frontend', 'node_modules')
   if (existsSync(sibling)) return sibling
+  const livePlatform = join(repoRoot, '..', '..', 'platform', 'frontend', 'node_modules')
+  if (existsSync(livePlatform)) return livePlatform
   return null
 }
 

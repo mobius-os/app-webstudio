@@ -149,21 +149,6 @@ export function cleanIndexPaths(paths) {
   return [...new Set((paths || []).filter(isSafeStoragePath))].sort()
 }
 
-export function normalizeFileCacheSnapshot(parsed) {
-  if (!parsed || typeof parsed !== 'object') return null
-  const index = cleanIndexPaths(parsed.index)
-  const indexSet = new Set(index)
-  const contents = {}
-  const rawContents = (parsed.contents && typeof parsed.contents === 'object')
-    ? parsed.contents : {}
-  for (const [path, body] of Object.entries(rawContents)) {
-    if (indexSet.has(path) && typeof body === 'string') contents[path] = body
-  }
-  const lastPath = (typeof parsed.lastPath === 'string' && indexSet.has(parsed.lastPath))
-    ? parsed.lastPath : null
-  return { index, contents, lastPath }
-}
-
 export function buildTree(paths) {
   // Each node: { name, path, children: Map, isFile }
   const root = { name: '', path: '', children: new Map(), isFile: false }

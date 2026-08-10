@@ -2,16 +2,14 @@ import { useEffect, useState } from 'react'
 import {
   CHAT_OPEN_VERSION,
   CHAT_RATIO_VERSION,
-  FILE_CACHE_VERSION,
-  FILE_CONTENT_CACHE_LIMIT,
 } from './constants.js'
 import {
-  cleanIndexPaths,
   isManagedJsonPath,
   isSafeProjectId,
-  normalizeFileCacheSnapshot,
   prefixedPath,
 } from './domain.js'
+
+const JSON_UPDATE_RETRIES = 4
 
 export function makeStorage(appId, token) {
   const ms = (typeof window !== 'undefined' && window.mobius && window.mobius.storage) || null
@@ -107,6 +105,35 @@ export function makeStorage(appId, token) {
     if (!r.ok) throw new Error(`set ${path} → ${r.status}`)
     return { synced: true }
   }
+  async function updateJSON(path, mutate) {
+    if (typeof mutate !== 'function') throw new TypeError('updateJSON requires a mutator')
+    const readVersioned = typeof ms?.getWithVersion === 'function'
+      ? ms.getWithVersion.bind(ms)
+      : (typeof ms?._getWithVersion === 'function' ? ms._getWithVersion.bind(ms) : null)
+    const isOffline = typeof window !== 'undefined' && window.mobius?.online === false
+
+    // Shared project metadata is edited by the open UI, embedded agent, and
+    // other tabs. Merge under a server version while online; keep the runtime's
+    // queued last-write-wins behavior only for offline and legacy runtimes.
+    if (readVersioned && typeof ms?.durableWrite === 'function' && !isOffline) {
+      for (let attempt = 0; attempt < JSON_UPDATE_RETRIES; attempt += 1) {
+        const { value, version } = await readVersioned(path, 'json')
+        const next = mutate(value)
+        try {
+          const options = version == null ? { ifNoneMatch: true } : { ifMatch: version }
+          const result = await ms.durableWrite(path, next, options)
+          return { value: next, result }
+        } catch (error) {
+          if (error?.code === 'conflict' && attempt + 1 < JSON_UPDATE_RETRIES) continue
+          throw error
+        }
+      }
+    }
+
+    const current = isOffline ? await get(path) : await getFresh(path)
+    const next = mutate(current)
+    return { value: next, result: await setJSON(path, next) }
+  }
   async function remove(path) {
     if (ms && typeof ms.remove === 'function') return ms.remove(path)
     const r = await fetch(`/api/storage/apps/${appId}/${path}`, {
@@ -148,6 +175,7 @@ export function makeStorage(appId, token) {
     return { synced: true }
   }
   async function list(prefix = '') {
+    if (ms && typeof ms.list === 'function') return ms.list(prefix)
     const out = []
     let cursor = null
     do {
@@ -163,6 +191,19 @@ export function makeStorage(appId, token) {
     } while (cursor)
     return out
   }
+  async function listFiles(prefix = '') {
+    const files = []
+    const visit = async (dir) => {
+      const entries = await list(dir)
+      for (const entry of entries) {
+        if (!entry || typeof entry.path !== 'string') continue
+        if (entry.type === 'directory') await visit(`${entry.path.replace(/\/+$/, '')}/`)
+        else files.push(entry.path)
+      }
+    }
+    await visit(prefix)
+    return files
+  }
   async function pendingCount() {
     if (ms && typeof ms.pendingCount === 'function') {
       try { return await ms.pendingCount() } catch { return 0 }
@@ -175,8 +216,8 @@ export function makeStorage(appId, token) {
   }
   return {
     get, getFresh, getText, getBlob,
-    setText, setBlob, setJSON, remove,
-    move, removeFolder, list,
+    setText, setBlob, setJSON, updateJSON, remove,
+    move, removeFolder, list, listFiles,
     subscribeText,
     pendingCount,
     hasRuntime,
@@ -193,10 +234,15 @@ export function scopedStorage(storage, prefix) {
     setText: (path, text) => storage.setText(prefixedPath(p, path), text),
     setBlob: (path, blob, options) => storage.setBlob(prefixedPath(p, path), blob, options),
     setJSON: (path, obj) => storage.setJSON(prefixedPath(p, path), obj),
+    updateJSON: (path, mutate) => storage.updateJSON(prefixedPath(p, path), mutate),
     remove: (path) => storage.remove(prefixedPath(p, path)),
     move: (from, to) => storage.move(prefixedPath(p, from), prefixedPath(p, to)),
     removeFolder: (path) => storage.removeFolder(prefixedPath(p, path)),
     list: (path = '') => storage.list(prefixedPath(p, path)),
+    listFiles: async (path = '') => {
+      const paths = await storage.listFiles(prefixedPath(p, path))
+      return paths.map((item) => item.startsWith(p) ? item.slice(p.length) : item)
+    },
     subscribeText: (path, cb) => storage.subscribeText(prefixedPath(p, path), cb),
     pendingCount: () => storage.pendingCount(),
     hasRuntime: storage.hasRuntime,
@@ -270,11 +316,6 @@ export function writeActiveProject(appId, id) {
   try { localStorage.setItem(activeProjectKey(appId), id) } catch {}
 }
 
-export function fileCacheKey(appId, projectId = 'default') {
-  if (projectId === 'default') return `webstudio:${appId}:files-cache:v${FILE_CACHE_VERSION}`
-  return `webstudio:${appId}:project:${projectId}:files-cache:v${FILE_CACHE_VERSION}`
-}
-
 export function chatOpenKey(appId) {
   return `webstudio:${appId}:chat-open:v${CHAT_OPEN_VERSION}`
 }
@@ -297,44 +338,4 @@ export function readChatRatio(appId) {
   const raw = Number(localStorage.getItem(chatRatioKey(appId)))
   if (!Number.isFinite(raw) || raw < 0 || raw > 1) return 0.5
   return raw
-}
-
-export function readFileCache(appId, projectId = 'default') {
-  if (typeof localStorage === 'undefined') return null
-  try {
-    const raw = localStorage.getItem(fileCacheKey(appId, projectId))
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    return normalizeFileCacheSnapshot(parsed)
-  } catch {
-    return null
-  }
-}
-
-export function writeFileCache(appId, projectId, index, contents, lastPath) {
-  if (typeof localStorage === 'undefined') return
-  try {
-    const safeIndex = cleanIndexPaths(index)
-    const trimmed = {}
-    const indexSet = new Set(safeIndex)
-    const entries = Object.entries(contents)
-      .filter(([p, v]) => indexSet.has(p) && typeof v === 'string')
-      .slice(-FILE_CONTENT_CACHE_LIMIT)
-    for (const [p, v] of entries) trimmed[p] = v
-    localStorage.setItem(
-      fileCacheKey(appId, projectId),
-      JSON.stringify({
-        index: safeIndex,
-        contents: trimmed,
-        lastPath: (lastPath && indexSet.has(lastPath)) ? lastPath : null,
-      }),
-    )
-  } catch {
-    // Quota / disabled / serialization — leave the previous snapshot in place.
-  }
-}
-
-export function removeFileCache(appId, projectId) {
-  if (typeof localStorage === 'undefined') return
-  try { localStorage.removeItem(fileCacheKey(appId, projectId)) } catch {}
 }

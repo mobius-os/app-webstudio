@@ -301,7 +301,7 @@ export function FileNavPanel({
             <FileNode
               node={(root.children.size === 1 && root.children.has('files')) ? root.children.get('files') : root}
               selectedPath={selectedPath}
-              onSelect={(p) => { onSelect(p); onClose() }}
+              onSelect={(p) => { onSelect(p); if (!pinned) onClose() }}
               depth={-1}
               onContextMenu={setCtx}
               onMoveInto={onMove}

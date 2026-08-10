@@ -290,6 +290,38 @@ export const CSS = `
   overflow: hidden;
   background: var(--bg);
 }
+.ws-editor-with-status {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.ws-save-error {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--danger, var(--accent)) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger, var(--accent)) 9%, var(--surface));
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.ws-save-error button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.ws-save-error button:disabled { opacity: .55; cursor: default; }
 
 /* Managed .json files render read-only with an inline notice above the
    source — editing them as text/plain would corrupt them for typed-JSON
