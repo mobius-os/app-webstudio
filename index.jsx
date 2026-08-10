@@ -903,7 +903,9 @@ export default function App({ appId, token }) {
 
     readLatest()
     const interval = online
-      ? setInterval(() => { readLatest() }, SOURCE_SYNC_MS)
+      ? setInterval(() => {
+        if (document.visibilityState === 'visible') readLatest()
+      }, SOURCE_SYNC_MS)
       : null
     const onVisible = () => {
       if (document.visibilityState === 'visible') readLatest()

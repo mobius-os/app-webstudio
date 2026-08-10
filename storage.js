@@ -107,17 +107,14 @@ export function makeStorage(appId, token) {
   }
   async function updateJSON(path, mutate) {
     if (typeof mutate !== 'function') throw new TypeError('updateJSON requires a mutator')
-    const readVersioned = typeof ms?.getWithVersion === 'function'
-      ? ms.getWithVersion.bind(ms)
-      : (typeof ms?._getWithVersion === 'function' ? ms._getWithVersion.bind(ms) : null)
     const isOffline = typeof window !== 'undefined' && window.mobius?.online === false
 
     // Shared project metadata is edited by the open UI, embedded agent, and
     // other tabs. Merge under a server version while online; keep the runtime's
     // queued last-write-wins behavior only for offline and legacy runtimes.
-    if (readVersioned && typeof ms?.durableWrite === 'function' && !isOffline) {
+    if (typeof ms?.getWithVersion === 'function' && typeof ms?.durableWrite === 'function' && !isOffline) {
       for (let attempt = 0; attempt < JSON_UPDATE_RETRIES; attempt += 1) {
-        const { value, version } = await readVersioned(path, 'json')
+        const { value, version } = await ms.getWithVersion(path, 'json')
         const next = mutate(value)
         try {
           const options = version == null ? { ifNoneMatch: true } : { ifMatch: version }
