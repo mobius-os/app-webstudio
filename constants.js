@@ -20,3 +20,7 @@ export const BUILD_CLAIM_SETTLE_MS = 150
 export const SOURCE_AUTOSAVE_MS = 700
 export const SOURCE_SYNC_MS = 3500
 export const PROJECT_SYNC_MS = 5000
+// Ceiling on directories walked when fingerprinting files/ for the turn-end
+// auto-build. A site nests a handful of folders deep; this only exists so a
+// malformed listing can't spin the walk forever.
+export const AUTO_BUILD_MAX_DIRS = 200

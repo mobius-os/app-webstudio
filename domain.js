@@ -109,6 +109,45 @@ export function entryPathForHtmlDoc(doc) {
   return `build/site/${doc.slice('files/'.length)}`
 }
 
+// ---- Auto-build change detection ----------------------------------------
+// The embedded agent edits files/ directly; nothing about that write reaches
+// this app except through storage. To decide whether an agent turn (or an
+// autosave) left the preview stale we fingerprint the SOURCE tree and compare
+// it against the fingerprint taken when the last build was adopted.
+//
+// `entries` are apps-list rows ({path, type, size, modified_at}). Directories
+// carry no bytes, so only files contribute. Returns null when the tree cannot
+// be fingerprinted — a file whose size AND modified_at are both missing (the
+// offline-derived listing shape) makes the comparison meaningless, and a null
+// fingerprint must be read as "cannot tell", never as "unchanged".
+export function sourceFingerprint(entries) {
+  if (!Array.isArray(entries)) return null
+  const parts = []
+  for (const entry of entries) {
+    if (!entry || typeof entry.path !== 'string') continue
+    if (entry.type === 'directory') continue
+    if (!isSafeStoragePath(entry.path)) continue
+    const size = Number.isFinite(entry.size) ? entry.size : null
+    const stamp = entry.modified_at == null ? null : String(entry.modified_at)
+    if (size === null && stamp === null) return null
+    parts.push(`${entry.path}|${size === null ? '' : size}|${stamp || ''}`)
+  }
+  // Listing order is per-directory and the walk order is not guaranteed stable
+  // across calls; sort so an unchanged tree always fingerprints identically.
+  return parts.sort().join('\n')
+}
+
+// Whether an agent turn (or a pending autosave) left the built site stale.
+// `built` is the fingerprint captured when the current preview's build was
+// adopted; null means nothing has been built for this project yet, which IS a
+// reason to build. An unreadable current fingerprint is never a reason to
+// build — we would be guessing, and a wrong guess takes the app-wide build
+// slot away from a real build.
+export function sourceNeedsBuild(current, built) {
+  if (current === null) return false
+  return current !== built
+}
+
 // ---- Build dispatch (app-wide single-slot serialization) ----------------
 // /run-job carries no project context, so build.sh reads ONE shared root
 // build/target.txt and there is one build slot per app. These predicates make

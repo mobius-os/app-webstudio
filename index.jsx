@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { signal } from './analytics.js'
 import {
+  AUTO_BUILD_MAX_DIRS,
   CHAT_PANE_MIN_PX,
   DEFAULT_PROJECT,
   FILE_CONTENT_CACHE_LIMIT,
@@ -42,6 +43,8 @@ import {
   pickAutoSelectPath,
   projectPrefix,
   projectSlug,
+  sourceFingerprint,
+  sourceNeedsBuild,
 } from './domain.js'
 import {
   chatOpenKey,
@@ -240,6 +243,18 @@ export default function App({ appId, token }) {
   const build = useBuild({ appId, token, storage, rootStorage, prefix: activePrefix, online })
   const clearBuildPoll = build.clearPoll
   const seenBuildStatusRef = useRef('')
+  // The source fingerprint as of the build currently backing the preview.
+  // null = nothing built for this project yet. Compared against a fresh walk
+  // when an agent turn ends, to decide whether the preview went stale.
+  const builtFingerprintRef = useRef(null)
+  // Guards maybeAutoBuild against overlapping runs: the fingerprint walk is
+  // several awaits long, and a second turn landing mid-walk would otherwise
+  // race the same build slot.
+  const autoBuildingRef = useRef(false)
+  // maybeAutoBuild is declared after onBuildDone (which it needs), so the
+  // turn-end handler above reaches it through this ref rather than forcing a
+  // reorder of the whole component body.
+  const maybeAutoBuildRef = useRef(null)
   // Fires app_ready exactly once, after the first real hydration completes.
   const appReadyRef = useRef(false)
   const readFreshProjects = useCallback(async () => {
@@ -319,6 +334,8 @@ export default function App({ appId, token }) {
     selectedPathRef.current = null
     mainResolvedRef.current = false
     seenBuildStatusRef.current = ''
+    builtFingerprintRef.current = null
+    autoBuildingRef.current = false
     mainPathRef.current = null
     fileContentRef.current = ''
     fileDirtyRef.current = false
@@ -742,8 +759,50 @@ export default function App({ appId, token }) {
     online,
   ])
 
+  // Walk the project's files/ tree and return its apps-list entries with
+  // project-relative paths. The listing API is per-directory, so this is one
+  // request per folder — cheap for a site, and only ever called when a turn
+  // ends or a new build verdict is adopted, never on the sync poll.
+  const walkSourceEntries = useCallback(async () => {
+    const scope = activePrefix || ''
+    const strip = (path) => (scope && path.startsWith(scope) ? path.slice(scope.length) : path)
+    const out = []
+    const visited = new Set()
+    const visit = async (dir) => {
+      // A malformed listing that names its own parent would recurse forever;
+      // the visited set plus a hard ceiling keep a bad response bounded.
+      if (visited.has(dir) || visited.size >= AUTO_BUILD_MAX_DIRS) return
+      visited.add(dir)
+      const entries = await storage.list(dir)
+      if (!Array.isArray(entries)) return
+      for (const entry of entries) {
+        if (!entry || typeof entry.path !== 'string') continue
+        const rel = strip(entry.path)
+        if (entry.type === 'directory') await visit(`${rel.replace(/\/+$/, '')}/`)
+        else out.push({ ...entry, path: rel })
+      }
+    }
+    await visit('files/')
+    return out
+  }, [storage, activePrefix])
+
+  // null on any failure — sourceNeedsBuild reads null as "cannot tell" and
+  // refuses to build on it, so a transient listing error never steals the
+  // app-wide build slot from a real build.
+  const currentSourceFingerprint = useCallback(async () => {
+    try {
+      return sourceFingerprint(await walkSourceEntries())
+    } catch {
+      return null
+    }
+  }, [walkSourceEntries])
+
+  // Returns true when this sync observed a NEW successful build (a fresh
+  // build/status.json verdict we hadn't seen yet), so callers can react —
+  // e.g. flip the view to preview after the agent finishes a turn.
   const syncProjectFromStorage = useCallback(async () => {
-    if (!online) return
+    if (!online) return false
+    let newBuild = false
     await refreshFiles()
     const list = filesRef.current
 
@@ -767,18 +826,28 @@ export default function App({ appId, token }) {
       if (doc && entry) {
         const buildKey = `${doc}|${entry}|${status?.built_at || status?.log || ''}`
         if (seenBuildStatusRef.current !== buildKey) {
+          // Ignore the very first observation (mount/restore of an existing
+          // build); only a change from an already-seen key is a NEW build.
+          if (seenBuildStatusRef.current !== '') newBuild = true
           seenBuildStatusRef.current = buildKey
           build.rememberEntry(doc, entry)
+          // This verdict is the build now backing the preview — it may be one
+          // the agent kicked itself. Stamp the tree it covers so the auto-build
+          // below doesn't immediately rebuild what the agent already built.
+          const fingerprint = await currentSourceFingerprint()
+          if (fingerprint !== null) builtFingerprintRef.current = fingerprint
         }
       }
     } catch {
       // Best-effort; a missing status file just means no successful build yet.
     }
+    return newBuild
   }, [
     online,
     refreshFiles,
     storage,
     build.rememberEntry,
+    currentSourceFingerprint,
   ])
 
   useEffect(() => {
@@ -929,14 +998,23 @@ export default function App({ appId, token }) {
   }, [navOpen, refreshFiles])
 
   const onFilesMaybeChanged = useCallback(async () => {
-    await syncProjectFromStorage()
+    const newBuild = await syncProjectFromStorage()
     // The embedded agent finished a turn and we just re-synced the tree/index —
     // tells Reflection the user+agent creation loop is actually being exercised.
     signal('agent_files_changed', {})
+    // The agent rebuilt the site this turn — flip to the live preview so the
+    // user sees the fresh page without hunting for the Preview toggle. The
+    // preview reads FRESH bytes (see HtmlPreview), so the new build renders.
+    if (newBuild) setViewMode('preview')
     const path = selectedPathRef.current
     if (path && online && isTextProjectPath(path)) {
       storage.get(path).catch(() => {})
     }
+    // The agent edits files/ directly and the app is what owns the build slot,
+    // so nothing rebuilds the site unless we do it here. Without this an agent
+    // turn leaves the source changed and the preview showing the previous
+    // build — to the user, "it changed nothing".
+    await maybeAutoBuildRef.current?.()
   }, [syncProjectFromStorage, storage, online])
 
   const ensureIndexWritable = useCallback(async () => {
@@ -1332,6 +1410,44 @@ export default function App({ appId, token }) {
     // a whole directory mirror, so surfacing it as tree nodes would be noise.)
   }, [])
 
+  // Rebuild when an agent turn (or a pending autosave) left the built site
+  // stale. Deliberately app-side: the auto-build contract also lives in the
+  // agent's skill, but that is prose the agent may or may not follow, and the
+  // app is the only party that holds the dispatch claim and the poller. The
+  // fingerprint comparison is what keeps this from firing on a pure question
+  // ("what does this file do?") that changed nothing.
+  const maybeAutoBuild = useCallback(async () => {
+    if (!online) return
+    const main = mainPathRef.current
+    if (!main || !isHtmlDoc(main)) return
+    // build() no-ops while a build is in flight; bailing here keeps us from
+    // spending a whole tree walk to discover that.
+    if (autoBuildingRef.current || build.buildStatus === 'building') return
+    autoBuildingRef.current = true
+    try {
+      const fingerprint = await currentSourceFingerprint()
+      if (!sourceNeedsBuild(fingerprint, builtFingerprintRef.current)) return
+      // Stamp the tree BEFORE kicking. The build about to start covers exactly
+      // this fingerprint; re-walking after it lands would instead stamp a tree
+      // that may already carry newer edits and mark them built. A build that
+      // fails clears this back to null (see the effect below), so a failure
+      // always retries rather than latching.
+      builtFingerprintRef.current = fingerprint
+      signal('auto_build_started', {})
+      await build.build(main, onBuildDone)
+    } finally {
+      autoBuildingRef.current = false
+    }
+  }, [online, build, currentSourceFingerprint, onBuildDone])
+  useEffect(() => { maybeAutoBuildRef.current = maybeAutoBuild }, [maybeAutoBuild])
+
+  // A failed build leaves the preview stale, so forget the tree we optimistically
+  // stamped: the next turn (typically the agent's fix) must build again, even if
+  // it changed nothing else.
+  useEffect(() => {
+    if (build.buildStatus === 'error') builtFingerprintRef.current = null
+  }, [build.buildStatus])
+
   const handleEditorChange = useCallback((value) => {
     setFileContent(value)
     setFileDirty(true)
@@ -1458,6 +1574,8 @@ export default function App({ appId, token }) {
     selectedPathRef.current = null
     mainResolvedRef.current = false
     seenBuildStatusRef.current = ''
+    builtFingerprintRef.current = null
+    autoBuildingRef.current = false
     mainPathRef.current = null
     fileContentRef.current = ''
     fileDirtyRef.current = false
@@ -1862,6 +1980,13 @@ export default function App({ appId, token }) {
       : 'Tell the agent how to build or change your site — improve the design, add a page, or restructure what you have.'
   ), [build.buildStatus])
 
+  // The live view the embedded agent scopes its first action from: which file
+  // the user is looking at, whether the build is currently failing, which page
+  // is main. The chat sends this as an <app_state> block appended to the
+  // message content; ChatView strips that block before rendering (see
+  // msgText.stripAugmentation), so it reaches the agent without ever showing
+  // up in the user's own bubble. Suppressing it here instead would hide the
+  // tags at the cost of the agent's whole turn-scoping signal.
   const getContext = useCallback(() => {
     return Promise.resolve({
       openFile: selectedPath || null,
