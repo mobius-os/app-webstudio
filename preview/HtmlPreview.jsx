@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { signal } from '../analytics.js'
 import { isSafeRelPath } from '../domain.js'
+import { WS_NOTE_MODE_TYPE, WS_NOTE_PICK_TYPE } from '../constants.js'
 import {
   anchorActionFor,
+  noteScript,
   readWithRetry,
   resolveSiteAsset,
   WS_PREVIEW_NAV_SCRIPT,
   WS_PREVIEW_NAV_TYPE,
 } from './previewDomain.js'
 
-export function HtmlPreview({ storage, entryPath, version }) {
+export function HtmlPreview({ storage, entryPath, version, noteMode, notes, onNotePick, status }) {
   const [srcDoc, setSrcDoc] = useState(null)
   const [err, setErr] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -41,6 +43,43 @@ export function HtmlPreview({ storage, entryPath, version }) {
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
   }, [])
+
+  // A note pick from inside the sandbox. Same origin-by-identity guard as the
+  // nav listener above: the frame has an opaque origin, so `event.source` is
+  // the only thing that proves the message came from OUR preview and not from
+  // another frame on the page.
+  const onNotePickRef = useRef(onNotePick)
+  onNotePickRef.current = onNotePick
+  useEffect(() => {
+    const onMessage = (event) => {
+      const frame = frameRef.current
+      if (!frame || event.source !== frame.contentWindow) return
+      const data = event.data
+      if (!data || data.type !== WS_NOTE_PICK_TYPE) return
+      if (typeof data.selector !== 'string' || !data.selector) return
+      onNotePickRef.current?.({
+        selector: data.selector,
+        tag: typeof data.tag === 'string' ? data.tag : '',
+        text: typeof data.text === 'string' ? data.text : '',
+        page: pageEntry,
+      })
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [pageEntry])
+
+  // Push mode + the note list into the frame. This is an update, never a
+  // re-render: rebuilding srcdoc to toggle annotation would remount the page
+  // and lose the reader's scroll position mid-annotation.
+  useEffect(() => {
+    const frame = frameRef.current
+    if (!frame || !frame.contentWindow || srcDoc == null) return
+    frame.contentWindow.postMessage({
+      type: WS_NOTE_MODE_TYPE,
+      on: !!noteMode,
+      notes: Array.isArray(notes) ? notes : [],
+    }, '*')
+  }, [noteMode, notes, srcDoc])
 
   useEffect(() => {
     let cancelled = false
@@ -205,6 +244,12 @@ export function HtmlPreview({ storage, entryPath, version }) {
         const navScript = doc.createElement('script')
         navScript.textContent = WS_PREVIEW_NAV_SCRIPT
         ;(doc.body || doc.documentElement).appendChild(navScript)
+        // The annotation half. Always injected — it is inert until the parent
+        // posts a mode message, so a preview that is never annotated pays only
+        // the script's parse cost.
+        const noteScriptEl = doc.createElement('script')
+        noteScriptEl.textContent = noteScript(WS_NOTE_MODE_TYPE, WS_NOTE_PICK_TYPE)
+        ;(doc.body || doc.documentElement).appendChild(noteScriptEl)
 
         if (cancelled) return
         const serialized = `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`
@@ -251,8 +296,28 @@ export function HtmlPreview({ storage, entryPath, version }) {
           title="Site preview"
           sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
           srcDoc={srcDoc}
+          onLoad={() => {
+            // The mode effect above can fire before the frame's listener is
+            // installed. Re-post on load so pins survive a rebuild/navigation.
+            const frame = frameRef.current
+            frame?.contentWindow?.postMessage({
+              type: WS_NOTE_MODE_TYPE,
+              on: !!noteMode,
+              notes: Array.isArray(notes) ? notes : [],
+            }, '*')
+          }}
         />
       )}
+      {/* One line at a time: the send confirmation outranks the how-to hint,
+          because it answers the question the user actually has after pressing
+          Send ("did that do anything?"). */}
+      {status
+        ? <div className="ws-note-hint" role="status">{status}</div>
+        : (noteMode && srcDoc != null && (
+          <div className="ws-note-hint" role="status">
+            Click anything on the page to leave a note for the agent.
+          </div>
+        ))}
     </div>
   )
 }

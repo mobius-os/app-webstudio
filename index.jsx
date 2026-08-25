@@ -16,10 +16,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { signal } from './analytics.js'
 import {
+  AGENT_WATCH_MS,
+  AGENT_WATCH_POLL_MS,
   AUTO_BUILD_MAX_DIRS,
+  NOTES_MAX,
+  NOTES_PATH,
   CHAT_PANE_MIN_PX,
   DEFAULT_PROJECT,
   FILE_CONTENT_CACHE_LIMIT,
+  IMAGE_PREVIEW_EXTS,
   PROJECT_SYNC_MS,
   SOURCE_AUTOSAVE_MS,
   SOURCE_SYNC_MS,
@@ -27,7 +32,9 @@ import {
 } from './constants.js'
 import { CSS } from './theme.js'
 import {
+  annotatablePreview,
   cleanIndexPaths,
+  composeNotesMessage,
   clampChatRatio,
   deleteStorageTree,
   entryPathForHtmlDoc,
@@ -39,6 +46,8 @@ import {
   isSafeRelPath,
   isSafeStoragePath,
   isTextProjectPath,
+  makeNote,
+  normalizeNotes,
   normalizeProjects,
   pickAutoSelectPath,
   projectPrefix,
@@ -67,6 +76,7 @@ import { CodeIcon } from './ui/CodeIcon.jsx'
 import { EyeIcon } from './ui/EyeIcon.jsx'
 import { FileNavPanel } from './ui/FileNavPanel.jsx'
 import { ImagePreview } from './ui/ImagePreview.jsx'
+import { PencilIcon } from './ui/PencilIcon.jsx'
 import { PlayIcon } from './ui/PlayIcon.jsx'
 import { SyncPill } from './ui/SyncPill.jsx'
 import { useModal } from './ui/useModal.jsx'
@@ -255,6 +265,22 @@ export default function App({ appId, token }) {
   // turn-end handler above reaches it through this ref rather than forcing a
   // reorder of the whole component body.
   const maybeAutoBuildRef = useRef(null)
+  // Page notes: short instructions the user pins to elements in the Preview,
+  // batched into one agent turn. Persisted per project in comments.json.
+  const [notes, setNotes] = useState([])
+  const [noteMode, setNoteMode] = useState(false)
+  const [sendingNotes, setSendingNotes] = useState(false)
+  // A short line under the preview telling the user what just happened to
+  // their notes. Sending used to be silent, which read as "nothing happened".
+  const [noteStatus, setNoteStatus] = useState('')
+  // True while we actively watch for the agent's edits after a send.
+  const [watchingAgent, setWatchingAgent] = useState(false)
+  const watchUntilRef = useRef(0)
+  const notesRef = useRef(notes)
+  useEffect(() => { notesRef.current = notes }, [notes])
+  // Serializes note writes. Two quick pins would otherwise both read the same
+  // array and the second would drop the first.
+  const notesWriteRef = useRef(Promise.resolve())
   // Fires app_ready exactly once, after the first real hydration completes.
   const appReadyRef = useRef(false)
   const readFreshProjects = useCallback(async () => {
@@ -336,6 +362,9 @@ export default function App({ appId, token }) {
     seenBuildStatusRef.current = ''
     builtFingerprintRef.current = null
     autoBuildingRef.current = false
+    notesRef.current = []
+    setNotes([])
+    setNoteMode(false)
     mainPathRef.current = null
     fileContentRef.current = ''
     fileDirtyRef.current = false
@@ -1448,6 +1477,190 @@ export default function App({ appId, token }) {
     if (build.buildStatus === 'error') builtFingerprintRef.current = null
   }, [build.buildStatus])
 
+
+  // ---- Page notes -------------------------------------------------------
+
+  const readNotes = useCallback(async () => {
+    try {
+      return normalizeNotes(await storage.get(NOTES_PATH))
+    } catch {
+      // No notes yet, or a transient read. An empty list is the safe reading:
+      // it shows no pins rather than inventing them.
+      return []
+    }
+  }, [storage])
+
+  // Load this project's notes once the project settles. Not part of the sync
+  // poll — notes only change when the user or this app writes them.
+  useEffect(() => {
+    if (!online) return undefined
+    let cancelled = false
+    readNotes().then((stored) => {
+      if (cancelled) return
+      notesRef.current = stored
+      setNotes(stored)
+    })
+    return () => { cancelled = true }
+  }, [online, readNotes, activePrefix])
+
+  // Every note write goes through this queue so two fast pins can't both read
+  // the same array and have the second clobber the first.
+  const writeNotes = useCallback((mutate) => {
+    const next = notesWriteRef.current.then(async () => {
+      const current = notesRef.current
+      const updated = normalizeNotes(mutate(current))
+      notesRef.current = updated
+      setNotes(updated)
+      try {
+        await storage.setJSON(NOTES_PATH, updated)
+      } catch {
+        // The pin is already on screen and in notesRef; a failed write means
+        // it won't survive a reload, which is better than dropping it now.
+      }
+      return updated
+    })
+    notesWriteRef.current = next.catch(() => notesRef.current)
+    return next
+  }, [storage])
+
+  // A click landed on an element in the Preview while note mode was on.
+  const handleNotePick = useCallback(async (pick) => {
+    if (notesRef.current.length >= NOTES_MAX) {
+      await modal.alert(
+        `You can pin ${NOTES_MAX} notes at a time. Send the ones you have, `
+          + 'then keep going.',
+        { title: 'Note limit reached' },
+      )
+      return
+    }
+    const text = await modal.prompt(
+      'What should the agent change here?',
+      { title: 'Note on this element', placeholder: 'e.g. make this heading bigger' },
+    )
+    if (!text || !text.trim()) return
+    const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `n-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const note = makeNote(pick, text, id)
+    if (!note) return
+    signal('note_added', {})
+    await writeNotes((current) => [...current, note])
+  }, [modal, writeNotes])
+
+  const toggleNoteMode = useCallback(() => {
+    setNoteMode((on) => {
+      if (!on) signal('note_mode_opened', {})
+      return !on
+    })
+  }, [])
+
+  // Send the batch as ONE message into the app's own embedded chat. An app
+  // token may post to a chat it created, which is exactly this chat — so the
+  // notes arrive as a normal user turn and the agent answers in the panel the
+  // user is already looking at.
+  const handleSendNotes = useCallback(async () => {
+    const pending = notesRef.current
+    if (pending.length === 0 || sendingNotes) return
+    const content = composeNotesMessage(pending, mainPathRef.current)
+    if (!content) return
+    setSendingNotes(true)
+    // Open the chat BEFORE the send, not after. Mounted first, the panel
+    // streams the whole turn — the user sees the agent pick the notes up, and
+    // the mount can't miss the turn-done event that drives the rebuild.
+    if (!chatOpen) toggleChat()
+    try {
+      const stored = await storage.get('chat_id.json')
+      const chatId = stored && typeof stored.id === 'string' ? stored.id : ''
+      if (!chatId) {
+        await modal.alert(
+          'The agent chat has not started yet. Open the chat panel, then send '
+            + 'your notes.',
+          { title: 'Chat not ready' },
+        )
+        return
+      }
+      const r = await fetch(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content,
+          cid: (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : `cid-${Date.now()}`,
+          timezone: (() => {
+            try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' }
+          })(),
+        }),
+      })
+      if (!r.ok) {
+        signal('error', { message: `notes send → ${r.status}`, source: 'notes' })
+        await modal.alert(
+          `Could not send your notes (server returned ${r.status}).`,
+          { title: 'Send failed' },
+        )
+        return
+      }
+      signal('notes_sent', { count: pending.length })
+      // Sent notes are cleared: a pin on the page means "not yet addressed",
+      // so leaving them up after handing them over would misreport the state.
+      await writeNotes(() => [])
+      setNoteMode(false)
+      setNoteStatus(pending.length === 1
+        ? 'Sent your note — the agent is working on it…'
+        : `Sent ${pending.length} notes — the agent is working on them…`)
+      // Watch for the agent's edits ourselves. The turn-done event is the fast
+      // path; this is the safety net that makes the rebuild actually happen
+      // even when the panel was mounted mid-turn and never saw it.
+      watchUntilRef.current = Date.now() + AGENT_WATCH_MS
+      setWatchingAgent(true)
+    } catch (e) {
+      await modal.alert(
+        (e && e.message) || 'Could not send your notes.',
+        { title: 'Send failed' },
+      )
+    } finally {
+      setSendingNotes(false)
+    }
+  }, [sendingNotes, storage, token, modal, writeNotes, chatOpen, toggleChat])
+
+  // Poll for the agent's edits while a note batch is in flight, and rebuild as
+  // soon as the source changes. maybeAutoBuild is idempotent and fingerprint-
+  // gated, so a tick that finds nothing new costs one tree walk and stops.
+  useEffect(() => {
+    if (!watchingAgent || !online) return undefined
+    const tick = async () => {
+      if (Date.now() > watchUntilRef.current) {
+        setWatchingAgent(false)
+        setNoteStatus('')
+        return
+      }
+      if (document.visibilityState !== 'visible') return
+      await syncProjectFromStorage()
+      await maybeAutoBuildRef.current?.()
+    }
+    const id = setInterval(() => { tick().catch(() => {}) }, AGENT_WATCH_POLL_MS)
+    return () => clearInterval(id)
+  }, [watchingAgent, online, syncProjectFromStorage])
+
+  // A build starting is proof the agent's edits landed, so the status line has
+  // done its job — the build indicator takes over from here.
+  useEffect(() => {
+    if (build.buildStatus === 'building' && noteStatus) setNoteStatus('')
+  }, [build.buildStatus, noteStatus])
+
+  const handleClearNotes = useCallback(async () => {
+    if (notesRef.current.length === 0) return
+    const ok = await modal.confirm(
+      `Discard ${notesRef.current.length} note${notesRef.current.length === 1 ? '' : 's'}?`,
+      { title: 'Discard notes' },
+    )
+    if (!ok) return
+    await writeNotes(() => [])
+  }, [modal, writeNotes])
+
   const handleEditorChange = useCallback((value) => {
     setFileContent(value)
     setFileDirty(true)
@@ -1576,6 +1789,9 @@ export default function App({ appId, token }) {
     seenBuildStatusRef.current = ''
     builtFingerprintRef.current = null
     autoBuildingRef.current = false
+    notesRef.current = []
+    setNotes([])
+    setNoteMode(false)
     mainPathRef.current = null
     fileContentRef.current = ''
     fileDirtyRef.current = false
@@ -1863,7 +2079,17 @@ export default function App({ appId, token }) {
       )
     }
     if (entryForMain) {
-      return <HtmlPreview storage={storage} entryPath={entryForMain.entry} version={entryForMain.ver} />
+      return (
+        <HtmlPreview
+          storage={storage}
+          entryPath={entryForMain.entry}
+          version={entryForMain.ver}
+          noteMode={noteMode}
+          notes={notes}
+          onNotePick={handleNotePick}
+          status={noteStatus}
+        />
+      )
     }
     return (
       <div className="ws-preview-note ws-build-note">
@@ -1927,7 +2153,7 @@ export default function App({ appId, token }) {
         </div>
       )
     }
-    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'].includes(selectedExt)) {
+    if (IMAGE_PREVIEW_EXTS.has(selectedExt)) {
       return <ImagePreview storage={storage} path={selectedPath} />
     }
     if (isWide && mainPath && isTextProjectPath(selectedPath)) {
@@ -1972,6 +2198,30 @@ export default function App({ appId, token }) {
   const showHtmlControls = !!mainPath && selectedPath === mainPath
   const openName = selectedPath ? selectedPath.replace(/^files\//, '') : null
 
+  // Is the preview actually on screen right now? This mirrors renderMain's
+  // branches exactly, because "the preview is visible" is NOT the same as
+  // viewMode === 'preview': on a wide screen the split shows the preview
+  // beside the editor while viewMode stays 'source' (the Source/Preview
+  // toggle only exists on narrow screens). Gating annotation on viewMode
+  // alone hid the note button on every desktop layout.
+  const canAnnotate = annotatablePreview({
+    selectedPath,
+    selectedExt,
+    isWide,
+    mainPath,
+    viewMode,
+    hasBuiltEntry: !!entryForMain,
+  })
+
+  // Note mode is only meaningful over a rendered preview. Closing the preview
+  // (switching to Source, opening an image, a build failing) leaves the toggle
+  // unreachable, so drop the mode with it rather than stranding it on.
+  // MUST stay below canAnnotate: a deps array is evaluated during render, so
+  // reading a `const` declared further down throws before the app can paint.
+  useEffect(() => {
+    if (!canAnnotate) setNoteMode(false)
+  }, [canAnnotate])
+
   // A short informational line for the embedded chat's empty state — what the
   // agent can do, calling out a failing build when there is one.
   const guidance = useMemo(() => (
@@ -1982,11 +2232,10 @@ export default function App({ appId, token }) {
 
   // The live view the embedded agent scopes its first action from: which file
   // the user is looking at, whether the build is currently failing, which page
-  // is main. The chat sends this as an <app_state> block appended to the
-  // message content; ChatView strips that block before rendering (see
-  // msgText.stripAugmentation), so it reaches the agent without ever showing
-  // up in the user's own bubble. Suppressing it here instead would hide the
-  // tags at the cost of the agent's whole turn-scoping signal.
+  // is main. The shell appends this to the outgoing message; whether it also
+  // hides it from the rendered bubble is the shell's business, not ours.
+  // Unchanged here — page notes carry their own file and element context in
+  // the message the app composes, so the feature does not depend on it.
   const getContext = useCallback(() => {
     return Promise.resolve({
       openFile: selectedPath || null,
@@ -2068,6 +2317,40 @@ export default function App({ appId, token }) {
                 </button>
               </div>
             </>
+          )}
+          {/* Annotation controls ride with the Preview: a pin is a position on
+              the rendered page, so offering them over the source editor would
+              promise something the Source view can't deliver. */}
+          {canAnnotate && (
+            <button
+              type="button"
+              className={`ws-toolbar-btn ${noteMode ? 'ws-toolbar-btn--active' : ''}`}
+                onClick={toggleNoteMode}
+                aria-pressed={noteMode}
+                aria-label={noteMode ? 'Stop adding notes' : 'Add a note to the page'}
+              title={noteMode
+                ? 'Stop adding notes'
+                : 'Add a note — click an element on the page'}
+            >
+              <PencilIcon size={20} />
+            </button>
+          )}
+          {/* Send follows the NOTES, not the preview: a batch pinned and then
+              left while switching to Source must stay sendable, not stranded. */}
+          {notes.length > 0 && (
+            <button
+              type="button"
+              className="ws-toolbar-btn ws-notes-send"
+              onClick={handleSendNotes}
+              onContextMenu={(e) => { e.preventDefault(); handleClearNotes() }}
+              disabled={sendingNotes}
+              aria-label={`Send ${notes.length} note${notes.length === 1 ? '' : 's'} to the agent`}
+              title={sendingNotes
+                ? 'Sending…'
+                : `Send ${notes.length} note${notes.length === 1 ? '' : 's'} to the agent (right-click to discard)`}
+            >
+              {sendingNotes ? '…' : `Send ${notes.length}`}
+            </button>
           )}
           {mainPath && (isWide || showHtmlControls) && (
             <button

@@ -203,6 +203,42 @@ export const CSS = `
   .ws-toolbar-btn:hover:not(:disabled) { background: var(--surface2, var(--surface)); }
   .ws-toolbar-btn--primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, #000); }
 }
+
+/* Page notes. The active toggle borrows the accent so "I am in annotation
+   mode" reads at a glance — the cursor change lives inside the preview frame
+   and is invisible from out here. */
+.ws-toolbar-btn--active {
+  background: var(--accent-hover, var(--accent));
+  border-color: var(--accent-hover, var(--accent));
+  color: var(--accent-fg);
+}
+.ws-toolbar-btn--active:active { background: color-mix(in srgb, var(--accent) 80%, #000); }
+/* Send carries a count, so it is a text pill rather than a 44px icon square.
+   min-width keeps it at the same touch target as its icon neighbours. */
+.ws-notes-send {
+  width: auto;
+  min-width: 44px;
+  padding: 0 12px;
+  font: 600 13px/1 inherit;
+  white-space: nowrap;
+}
+.ws-note-hint {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 12px;
+  z-index: 3;
+  max-width: min(92%, 460px);
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  text-align: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
 .ws-chat-toggle-btn[aria-pressed="true"] {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface));
   color: var(--accent);

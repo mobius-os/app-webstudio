@@ -168,3 +168,153 @@ export async function readWithRetry(read, {
   if (lastErr) throw lastErr
   return null
 }
+
+// ---- Page notes: the in-sandbox half ------------------------------------
+// The preview is a srcdoc frame WITHOUT allow-same-origin, so the parent can
+// neither read the site's DOM nor measure an element's position. Everything
+// about pinning therefore has to run inside the frame: this script derives the
+// selector, draws the pins, and talks to the parent only through postMessage.
+// The parent stays the source of truth for the note list and re-posts it
+// whenever it changes.
+//
+// Toggling the mode is a message rather than a re-render on purpose: rebuilding
+// srcdoc to flip a boolean would remount the whole page and throw away the
+// reader's scroll position mid-annotation.
+export const WS_NOTE_SCRIPT_TEMPLATE = `
+(function () {
+  var MODE = '__MODE_TYPE__'
+  var PICK = '__PICK_TYPE__'
+  var on = false
+  var notes = []
+  var pins = []
+
+  // A selector the PARENT can hand to the agent. Prefer an id (short and
+  // stable across a rebuild); otherwise walk up recording nth-of-type so the
+  // path stays valid when siblings of other tags come and go.
+  function selectorFor(el) {
+    if (!el || el.nodeType !== 1) return ''
+    if (el.id && /^[A-Za-z][-\\w]*$/.test(el.id)) return '#' + el.id
+    var parts = []
+    var node = el
+    while (node && node.nodeType === 1 && node !== document.documentElement) {
+      var tag = node.tagName.toLowerCase()
+      var parent = node.parentNode
+      if (!parent) break
+      var index = 1
+      var sibling = node
+      while ((sibling = sibling.previousElementSibling)) {
+        if (sibling.tagName === node.tagName) index++
+      }
+      parts.unshift(tag + ':nth-of-type(' + index + ')')
+      if (tag === 'body') break
+      node = parent
+    }
+    return parts.join(' > ')
+  }
+
+  function clearPins() {
+    for (var i = 0; i < pins.length; i++) {
+      if (pins[i] && pins[i].parentNode) pins[i].parentNode.removeChild(pins[i])
+    }
+    pins = []
+  }
+
+  // Pins are absolutely positioned in DOCUMENT space and re-laid-out on
+  // resize, so they track their element through reflow without needing the
+  // parent (which cannot see into this frame) to know anything about layout.
+  function drawPins() {
+    clearPins()
+    if (!document.body) return
+    for (var i = 0; i < notes.length; i++) {
+      var note = notes[i]
+      var target = null
+      try { target = document.querySelector(note.selector) } catch (e) { target = null }
+      if (!target) continue
+      var box = target.getBoundingClientRect()
+      var pin = document.createElement('div')
+      pin.textContent = String(i + 1)
+      pin.setAttribute('title', note.note)
+      // all:initial keeps the site's own CSS (a global div rule, a reset)
+      // from restyling the pin out of existence.
+      pin.style.cssText = 'all:initial;position:absolute;z-index:2147483646;'
+        + 'font:600 12px/20px system-ui,sans-serif;color:#fff;background:#d1453b;'
+        + 'width:20px;height:20px;border-radius:10px;text-align:center;'
+        + 'box-shadow:0 1px 4px rgba(0,0,0,.4);pointer-events:none;'
+      pin.style.left = (box.left + window.scrollX - 6) + 'px'
+      pin.style.top = (box.top + window.scrollY - 6) + 'px'
+      document.body.appendChild(pin)
+      pins.push(pin)
+    }
+  }
+
+  var outline = null
+  function setOutline(el) {
+    if (!outline) {
+      outline = document.createElement('div')
+      outline.style.cssText = 'all:initial;position:absolute;z-index:2147483645;'
+        + 'border:2px solid #d1453b;background:rgba(209,69,59,.08);'
+        + 'pointer-events:none;border-radius:2px;'
+    }
+    if (!el || !document.body) {
+      if (outline.parentNode) outline.parentNode.removeChild(outline)
+      return
+    }
+    var box = el.getBoundingClientRect()
+    outline.style.left = (box.left + window.scrollX) + 'px'
+    outline.style.top = (box.top + window.scrollY) + 'px'
+    outline.style.width = box.width + 'px'
+    outline.style.height = box.height + 'px'
+    if (!outline.parentNode) document.body.appendChild(outline)
+  }
+
+  document.addEventListener('mousemove', function (event) {
+    if (!on) return
+    setOutline(event.target && event.target.nodeType === 1 ? event.target : null)
+  }, true)
+
+  // Capture phase, and preventDefault/stopPropagation: while annotating, a
+  // click must never also activate the site's own handlers or follow a link.
+  document.addEventListener('click', function (event) {
+    if (!on) return
+    event.preventDefault()
+    event.stopPropagation()
+    var el = event.target
+    if (!el || el.nodeType !== 1) return
+    var text = ''
+    try { text = (el.innerText || el.textContent || '').slice(0, 200) } catch (e) { text = '' }
+    // The element's OWN markup is what makes a note findable in source. A
+    // selector derived from the built page is a hint at best: it breaks the
+    // moment the agent adds a sibling, and it says nothing a human would
+    // recognise. The markup is what the agent can actually grep for.
+    var html = ''
+    try { html = (el.outerHTML || '').replace(/\s+/g, ' ').slice(0, 300) } catch (e) { html = '' }
+    window.parent.postMessage({
+      type: PICK,
+      selector: selectorFor(el),
+      tag: el.tagName ? el.tagName.toLowerCase() : '',
+      text: text,
+      html: html,
+    }, '*')
+  }, true)
+
+  window.addEventListener('message', function (event) {
+    var data = event.data
+    if (!data || data.type !== MODE) return
+    on = !!data.on
+    notes = Array.isArray(data.notes) ? data.notes : []
+    try { document.body.style.cursor = on ? 'crosshair' : '' } catch (e) {}
+    if (!on) setOutline(null)
+    drawPins()
+  })
+
+  window.addEventListener('resize', drawPins)
+})()
+`
+
+// The parent injects the concrete types so the sandbox half and the parent
+// half can never drift to different message names.
+export function noteScript(modeType, pickType) {
+  return WS_NOTE_SCRIPT_TEMPLATE
+    .replace('__MODE_TYPE__', modeType)
+    .replace('__PICK_TYPE__', pickType)
+}

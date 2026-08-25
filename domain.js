@@ -1,4 +1,13 @@
-import { BINARY_FILE_EXTS, DEFAULT_PROJECT, NAME_RE, PROJECT_ID_RE } from './constants.js'
+import {
+  BINARY_FILE_EXTS,
+  DEFAULT_PROJECT,
+  IMAGE_PREVIEW_EXTS,
+  NAME_RE,
+  NOTE_LABEL_MAX_CHARS,
+  NOTE_MAX_CHARS,
+  NOTES_MAX,
+  PROJECT_ID_RE,
+} from './constants.js'
 
 export const projectPrefix = (id) => (id === 'default' ? '' : `projects/${id}/`)
 
@@ -57,6 +66,10 @@ const MANAGED_JSON_NAMES = new Set([
   'build/status.json',
   'build/dispatch.json',
   'projects.json',
+  // Page notes are written by the pin UI, not typed by hand — same class as
+  // main.json. Leaving it editable would let a stray keystroke in the editor
+  // desync the pins from what the agent is about to be told.
+  'comments.json',
 ])
 export function isManagedJsonPath(path) {
   const rel = String(path || '').replace(/^projects\/[A-Za-z0-9_-]+\//, '')
@@ -285,3 +298,156 @@ export async function deleteStorageTree(storage, prefix) {
 }
 
 // ----------------------------------------------------------------------
+
+// ---- Page notes ---------------------------------------------------------
+// A note is one short instruction the user pinned to an element in the
+// Preview. It carries enough to find that element again in SOURCE: the
+// selector the injected script derived from the built page, plus the tag and
+// a text snippet as a human-readable fallback. The built site is a verbatim
+// copy of files/, so a selector on the built page addresses the same element
+// in the source file — that equivalence is what makes a pin actionable.
+
+function cleanNoteText(value) {
+  // Collapse whitespace: a note travels into a numbered list in the agent
+  // message, and an embedded newline would break that list apart.
+  const text = String(value == null ? '' : value).replace(/\s+/g, ' ').trim()
+  return text.slice(0, NOTE_MAX_CHARS)
+}
+
+export function noteLabel(tag, text) {
+  const name = String(tag || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 20)
+  const snippet = String(text == null ? '' : text).replace(/\s+/g, ' ').trim()
+  if (!name) return snippet.slice(0, NOTE_LABEL_MAX_CHARS)
+  if (!snippet) return `<${name}>`
+  const short = snippet.length > NOTE_LABEL_MAX_CHARS
+    ? `${snippet.slice(0, NOTE_LABEL_MAX_CHARS - 1)}…`
+    : snippet
+  return `<${name}> "${short}"`
+}
+
+// One stored note, or null when the pick/text can't make a usable one. Never
+// throws: this runs on a postMessage payload from the sandboxed preview,
+// which is untrusted input even though we injected the script that sends it.
+export function makeNote(pick, text, id) {
+  const body = cleanNoteText(text)
+  if (!body) return null
+  const source = pick && typeof pick === 'object' ? pick : {}
+  const selector = typeof source.selector === 'string' ? source.selector.slice(0, 400) : ''
+  if (!selector) return null
+  return {
+    id: String(id || ''),
+    selector,
+    label: noteLabel(source.tag, source.text),
+    // Collapsed here too, not just in the injected script: this arrives by
+    // postMessage and is untrusted, and a newline would break the one-line-
+    // per-note shape composeNotesMessage builds.
+    html: typeof source.html === 'string'
+      ? source.html.replace(/\s+/g, ' ').trim().slice(0, 300)
+      : '',
+    page: sourcePageForBuilt(source.page),
+    note: body,
+  }
+}
+
+// build/site/about.html -> files/about.html. The preview reports the BUILT
+// path it navigated to; the agent edits source, so a note has to name the
+// source file or a multi-page site sends it to edit the wrong one.
+export function sourcePageForBuilt(page) {
+  const value = typeof page === 'string' ? page : ''
+  if (!value.startsWith('build/site/')) return ''
+  const rel = value.slice('build/site/'.length)
+  return rel ? `files/${rel}` : ''
+}
+
+// Drop anything malformed and enforce the cap. Used on every read of
+// comments.json — the file is app metadata, but another tab or a hand-edit
+// can still put junk in it, and a bad entry must not break the pin overlay.
+export function normalizeNotes(raw) {
+  if (!Array.isArray(raw)) return []
+  const out = []
+  const seen = new Set()
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    if (typeof entry.id !== 'string' || !entry.id || seen.has(entry.id)) continue
+    if (typeof entry.selector !== 'string' || !entry.selector) continue
+    const note = cleanNoteText(entry.note)
+    if (!note) continue
+    seen.add(entry.id)
+    out.push({
+      id: entry.id,
+      selector: entry.selector.slice(0, 400),
+      label: typeof entry.label === 'string' ? entry.label.slice(0, 200) : '',
+      html: typeof entry.html === 'string'
+        ? entry.html.replace(/\s+/g, ' ').trim().slice(0, 300) : '',
+      page: typeof entry.page === 'string' ? entry.page : '',
+      note,
+    })
+    if (out.length >= NOTES_MAX) break
+  }
+  return out
+}
+
+// The message the batch becomes. Numbered so the agent can work through it and
+// report per item, and explicit that each note names a real element — a bare
+// list of wishes reads as one vague request and gets one vague change.
+export function composeNotesMessage(notes, mainPath) {
+  const list = normalizeNotes(notes)
+  if (list.length === 0) return ''
+  // Only claim a single page when every note actually sits on it. A preview
+  // can navigate between pages mid-session, and naming the wrong file is worse
+  // than naming none — the agent would edit a page the user never annotated.
+  const pages = new Set(list.map((entry) => entry.page).filter(Boolean))
+  const single = pages.size === 1 ? [...pages][0] : (pages.size === 0 ? mainPath : '')
+  const where = single ? ` on ${single}` : ''
+  const head = list.length === 1
+    ? `I left a note${where}. Apply it:`
+    : `I left ${list.length} notes${where}. Apply each one:`
+  const lines = list.map((entry, i) => {
+    const label = entry.label ? `${entry.label} — ` : ''
+    // Name the file per item when the batch spans pages.
+    const file = (!single && entry.page) ? `\n   in: ${entry.page}` : ''
+    // The markup is the primary locator. The selector follows only as a
+    // fallback hint, explicitly demoted below, because a path derived from the
+    // BUILT page goes stale as soon as the source gains a sibling element.
+    const markup = entry.html ? `\n   element: ${entry.html}` : ''
+    const hint = entry.html ? '' : `\n   selector hint: ${entry.selector}`
+    return `${i + 1}. ${label}${entry.note}${file}${markup}${hint}`
+  })
+  return [
+    head,
+    '',
+    ...lines,
+    '',
+    'Find each element yourself in the source file — by its markup or its text '
+      + '— and make the change there. The `element:` line is the markup as it '
+      + 'renders, so it may differ from the source if the page is generated; '
+      + 'treat it as a description of what I clicked, not as an exact string to '
+      + 'match. Then rebuild.',
+  ].join('\n')
+}
+
+// Can the user pin a note right now? This MIRRORS renderMain's branches, and
+// the mirroring is the whole point: "the preview is visible" is not the same
+// as viewMode === 'preview'. On a wide screen the split renders the preview
+// beside the editor while viewMode stays 'source' — the Source/Preview toggle
+// only exists on narrow layouts. Gating on viewMode alone hides the note
+// button on every desktop layout, which is exactly the bug this replaces.
+//
+// `hasBuiltEntry` is the last condition because a pin needs a rendered page:
+// without a successful build the preview pane is a placeholder, and
+// annotating a placeholder means nothing.
+export function annotatablePreview({
+  selectedPath,
+  selectedExt,
+  isWide,
+  mainPath,
+  viewMode,
+  hasBuiltEntry,
+}) {
+  if (!selectedPath || !hasBuiltEntry) return false
+  if (IMAGE_PREVIEW_EXTS.has(String(selectedExt || '').toLowerCase())) return false
+  // Wide: editor + preview side by side for ANY text file, viewMode ignored.
+  if (isWide && mainPath && isTextProjectPath(selectedPath)) return true
+  // Narrow: one pane, and the preview is only offered on the main page.
+  return selectedPath === mainPath && viewMode === 'preview'
+}
