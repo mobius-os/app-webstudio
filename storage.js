@@ -69,6 +69,28 @@ export function makeStorage(appId, token) {
     if (!r.ok) return null
     return r.blob()
   }
+  // Fresh (cache-bypassing) reads for the preview. The runtime getText/getBlob
+  // are cache-first, so after a server-side agent rebuilds build/site/* the
+  // preview would otherwise re-read the STALE mirrored bytes and show the old
+  // page. These hit the backend directly with a per-call cache-bust so a fresh
+  // build renders immediately. A `_ts` query is harmless to the storage route.
+  async function getFreshText(path) {
+    const r = await fetch(`/api/storage/apps/${appId}/${path}?_ts=${Date.now()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+    if (r.status === 404) return null
+    if (!r.ok) throw new Error(`getFreshText ${path} → ${r.status}`)
+    return r.text()
+  }
+  async function getFreshBlob(path) {
+    const r = await fetch(`/api/storage/apps/${appId}/${path}?_ts=${Date.now()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+    if (!r.ok) return null
+    return r.blob()
+  }
   async function setText(path, text) {
     // Write through the runtime's TYPED text writer — ms.set is the JSON writer
     // (sends application/json + JSON.stringify), which corrupts/400s a .html or
@@ -212,7 +234,7 @@ export function makeStorage(appId, token) {
     return () => {}
   }
   return {
-    get, getFresh, getText, getBlob,
+    get, getFresh, getText, getBlob, getFreshText, getFreshBlob,
     setText, setBlob, setJSON, updateJSON, remove,
     move, removeFolder, list, listFiles,
     subscribeText,
@@ -228,6 +250,8 @@ export function scopedStorage(storage, prefix) {
     getFresh: (path) => storage.getFresh(prefixedPath(p, path)),
     getText: (path) => storage.getText(prefixedPath(p, path)),
     getBlob: (path) => storage.getBlob(prefixedPath(p, path)),
+    getFreshText: (path) => storage.getFreshText(prefixedPath(p, path)),
+    getFreshBlob: (path) => storage.getFreshBlob(prefixedPath(p, path)),
     setText: (path, text) => storage.setText(prefixedPath(p, path), text),
     setBlob: (path, blob, options) => storage.setBlob(prefixedPath(p, path), blob, options),
     setJSON: (path, obj) => storage.setJSON(prefixedPath(p, path), obj),

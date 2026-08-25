@@ -54,18 +54,27 @@ export function HtmlPreview({ storage, entryPath, version }) {
     // Fetch a same-build asset as a blob: URL (images/fonts/binary) or as
     // text (css/js) depending on extension. Memoised per path so a page that
     // references one stylesheet from multiple rules fetches it once.
+    // Read built assets FRESH (cache-bypassing) so a just-finished build shows
+    // its new bytes instead of the runtime's stale mirror. Fall back to the
+    // cache-first readers on an older runtime that lacks the fresh variants.
+    const readText = (sitePath) => (
+      storage.getFreshText ? storage.getFreshText(sitePath) : storage.getText(sitePath)
+    )
+    const readBlob = (sitePath) => (
+      storage.getFreshBlob ? storage.getFreshBlob(sitePath) : storage.getBlob(sitePath)
+    )
     const assetCache = new Map()
     const blobUrlFor = async (sitePath) => {
       if (assetCache.has(sitePath)) return assetCache.get(sitePath)
       const p = (async () => {
-        const blob = await storage.getBlob(sitePath)
+        const blob = await readBlob(sitePath)
         if (!blob) return null
         return track(URL.createObjectURL(blob))
       })()
       assetCache.set(sitePath, p)
       return p
     }
-    const textFor = async (sitePath) => storage.getText(sitePath)
+    const textFor = async (sitePath) => readText(sitePath)
 
     // Rewrite url(...) references inside a CSS string to blob URLs so an
     // inlined stylesheet's background-images / @font-face still load.
@@ -99,7 +108,7 @@ export function HtmlPreview({ storage, entryPath, version }) {
         // readWithRetry (module level) holds the retry contract — the main
         // page is the one read whose failure bricks the whole frame.
         const html = await readWithRetry(
-          () => storage.getText(pageEntry),
+          () => readText(pageEntry),
           { isCancelled: () => cancelled },
         )
         if (cancelled) return
