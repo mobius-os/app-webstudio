@@ -1,7 +1,7 @@
 {
   "id": "webstudio",
   "name": "Web Studio",
-  "version": "0.13.7",
+  "version": "1.0.0",
   "description": "Create Website Projects whose source, chats, built artifacts, and build history stay together.",
   "author": "mobius-os",
   "license": "MIT",
