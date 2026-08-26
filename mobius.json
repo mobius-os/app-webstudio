@@ -2,7 +2,7 @@
   "id": "webstudio",
   "name": "Web Studio",
   "version": "0.13.7",
-  "description": "Build a website with the agent and preview it live in an in-app browser.",
+  "description": "Create Website Projects whose source, chats, built artifacts, and build history stay together.",
   "author": "mobius-os",
   "license": "MIT",
   "homepage": "https://github.com/mobius-os/app-webstudio",
@@ -11,81 +11,68 @@
   "offline_capable": true,
   "offline": {
     "reads": true,
-    "writes": "queued",
+    "writes": "none",
     "execution": "none"
   },
-  "embeds_agent": true,
+  "embeds_agent": false,
   "permissions": {
     "cross_app_access": "none",
     "share_with_apps": "none"
-  },
-  "storage_seeds": {
-    "files/index.html": "seeds/files/index.html",
-    "files/style.css": "seeds/files/style.css",
-    "files/app.js": "seeds/files/app.js",
-    "files-index.json": [
-      "files/app.js",
-      "files/index.html",
-      "files/style.css"
-    ],
-    "main.json": {
-      "path": "files/index.html"
-    }
   },
   "runtime": {
     "imports": [
       "react",
       "react-dom",
-      "@codemirror/state",
-      "@codemirror/view",
-      "@codemirror/commands",
-      "@codemirror/language",
       "@openai/apps-sdk-ui/components/Icon"
     ],
     "esm_deps": []
   },
-  "schedule": {
-    "job": "build.sh"
-  },
   "source_files": [
-    "constants.js",
-    "analytics.js",
-    "theme.js",
-    "domain.js",
-    "storage.js",
-    "source-syntax.js",
-    "preview/previewDomain.js",
-    "preview/HtmlPreview.jsx",
-    "build/useBuild.js",
-    "ui/CodeEditor.jsx",
-    "ui/ImagePreview.jsx",
-    "ui/FileGlyph.jsx",
-    "ui/ChevronIcon.jsx",
-    "ui/EyeIcon.jsx",
-    "ui/CodeIcon.jsx",
-    "ui/PlayIcon.jsx",
-    "ui/BuildingIndicator.jsx",
-    "ui/KebabIcon.jsx",
-    "ui/ChatBubbleIcon.jsx",
-    "ui/PublishIcon.jsx",
-    "ui/UnpublishIcon.jsx",
-    "ui/CheckIcon.jsx",
-    "ui/PencilIcon.jsx",
-    "ui/PlusIcon.jsx",
-    "ui/NewFileIcon.jsx",
-    "ui/NewFolderIcon.jsx",
-    "ui/UploadIcon.jsx",
-    "ui/TrashIcon.jsx",
-    "ui/CopyIcon.jsx",
-    "ui/ContextMenu.jsx",
-    "ui/useLongPress.js",
-    "ui/FileNode.jsx",
-    "ui/ProjectSelector.jsx",
-    "ui/PublishDrawerAction.jsx",
-    "ui/FileNavPanel.jsx",
-    "ui/ChatPanel.jsx",
-    "ui/useModal.jsx",
-    "ui/ModalView.jsx",
-    "ui/SyncPill.jsx"
+    "webstudio-project.md",
+    "project-builder.sh",
+    "templates/index.html",
+    "templates/style.css",
+    "templates/app.js"
+  ],
+  "skills": [
+    "webstudio-project.md"
+  ],
+  "project_templates": [
+    {
+      "id": "website",
+      "name": "Website",
+      "description": "Build a local website with project chats and a previewable website artifact.",
+      "guidance": "Work directly inside the project root. Keep index.html and every local asset together, avoid external load-time dependencies, and build the HTML entry as a website artifact.",
+      "skills": [
+        "webstudio-project.md"
+      ],
+      "dependencies": [],
+      "files": {
+        "index.html": "templates/index.html",
+        "style.css": "templates/style.css",
+        "app.js": "templates/app.js"
+      },
+      "previews": [
+        {
+          "id": "website",
+          "name": "Website",
+          "kind": "html",
+          "path": "index.html"
+        }
+      ],
+      "artifact_types": [
+        {
+          "id": "website",
+          "name": "Website",
+          "extensions": [
+            "html",
+            "htm"
+          ],
+          "preview": "html",
+          "script": "project-builder.sh",
+          "output": "{source}"
+        }
+      ]
+    }
   ]
 }
