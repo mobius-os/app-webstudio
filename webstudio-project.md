@@ -1,19 +1,21 @@
 ---
 name: webstudio-project
-description: Work directly in a first-class Möbius Website Project. Use when PROJECT_TYPE is webstudio:website or the project context names the Website type; create and edit the source tree under PROJECT_ROOT and keep the built site as a project artifact.
+description: Work directly in a first-class Möbius Web Studio Project. Use when PROJECT_TYPE starts with webstudio: or the project context names Website, Mini-app, Interactive visualization, Document, Spreadsheet, or Presentation; edit the source tree under PROJECT_ROOT and keep the built result as a project artifact.
 ---
 
-# Website Project
+# Web Studio Project
 
 The Project is the workspace. Edit source files directly under `$PROJECT_ROOT`;
 do not modify the installed Web Studio app or its app-scoped storage.
 
-- Keep a clear HTML entry point (normally `index.html`) with relative local CSS,
-  JavaScript, image, and font paths.
+- Preserve the project format: HTML/CSS/JS for websites and visualizations,
+  `index.jsx` plus `mobius.json` for mini-apps, Markdown for documents, CSV for
+  spreadsheets, and self-contained HTML/CSS/JS for presentations.
 - Do not load CDNs, remote fonts, scripts, or images. Project previews are
   intentionally isolated and external load-time dependencies can leave the
-  page unusable.
-- Build the entry file with the Project's **Build as website** artifact action
-  after meaningful changes and verify the rendered result, not only the source.
-- Preserve unrelated source and asset files. Put new assets inside the Project
-  tree so the artifact builder can copy them with the site.
+  result unusable.
+- Use relative local asset paths and preserve unrelated source files.
+- Save meaningful changes so the Project can rebuild its registered artifact,
+  then verify the rendered result rather than trusting source alone.
+- Keep generated output under the Project's artifact area; never commit it with
+  the editable source tree.
