@@ -1,16 +1,18 @@
 # Web Studio
 
-Web Studio is the website-project type for Möbius Projects. The app creates and
-reopens website projects; Projects owns their files, chats, build history,
-preview, and built-site artifacts.
+Web Studio creates and reopens first-class Möbius Projects for websites,
+mini-apps, interactive visualizations, documents, spreadsheets, and
+presentations. Projects owns their files, chats, build history, preview, and
+built artifacts.
 
 ## Project contract
 
-- Template type: `webstudio:website`
-- Starter files: `templates/index.html`, `templates/style.css`, and
-  `templates/app.js`
-- Build action: `project-builder.sh`
-- Artifact: a self-contained website copied from the project root
+- Template types: `webstudio:website`, `mini-app`, `visualization`, `document`,
+  `spreadsheet`, and `presentation`
+- Starter source: local HTML/CSS/JS, React, Markdown, or CSV according to type
+- Build actions: confined self-contained website, mini-app, reading-view, and
+  data-view builders
+- Artwork: each example format carries crop-safe local cover art
 - Agent guidance: `webstudio-project.md`
 
 The installed app deliberately does not keep a parallel editor, chat, preview,

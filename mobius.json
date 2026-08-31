@@ -1,8 +1,8 @@
 {
   "id": "webstudio",
   "name": "Web Studio",
-  "version": "1.0.0",
-  "description": "Create Website Projects whose source, chats, built artifacts, and build history stay together.",
+  "version": "1.3.0",
+  "description": "Create live projects for websites, mini-apps, visualizations, documents, spreadsheets, and presentations.",
   "author": "mobius-os",
   "license": "MIT",
   "homepage": "https://github.com/mobius-os/app-webstudio",
@@ -30,9 +30,27 @@
   "source_files": [
     "webstudio-project.md",
     "project-builder.sh",
+    "mini-app-builder.sh",
+    "mini-app-builder.mjs",
+    "document-builder.sh",
+    "document-builder.py",
+    "spreadsheet-builder.sh",
+    "spreadsheet-builder.py",
     "templates/index.html",
     "templates/style.css",
-    "templates/app.js"
+    "templates/app.js",
+    "templates/mini-app/index.jsx",
+    "templates/mini-app/mobius.json",
+    "templates/visualization/index.html",
+    "templates/visualization/visualization.css",
+    "templates/visualization/data.js",
+    "templates/visualization/visualization.js",
+    "templates/document.md",
+    "templates/sheet.csv",
+    "templates/presentation/index.html",
+    "templates/artwork/document.png",
+    "templates/artwork/spreadsheet.png",
+    "templates/artwork/presentation.png"
   ],
   "skills": [
     "webstudio-project.md"
@@ -43,36 +61,87 @@
       "name": "Website",
       "description": "Build a local website with project chats and a previewable website artifact.",
       "guidance": "Work directly inside the project root. Keep index.html and every local asset together, avoid external load-time dependencies, and build the HTML entry as a website artifact.",
-      "skills": [
-        "webstudio-project.md"
-      ],
+      "skills": ["webstudio-project.md"],
       "dependencies": [],
       "files": {
         "index.html": "templates/index.html",
         "style.css": "templates/style.css",
         "app.js": "templates/app.js"
       },
-      "previews": [
-        {
-          "id": "website",
-          "name": "Website",
-          "kind": "html",
-          "path": "index.html"
-        }
-      ],
-      "artifact_types": [
-        {
-          "id": "website",
-          "name": "Website",
-          "extensions": [
-            "html",
-            "htm"
-          ],
-          "preview": "html",
-          "script": "project-builder.sh",
-          "output": "{source}"
-        }
-      ]
+      "previews": [{"id": "website", "name": "Website", "kind": "html", "path": "index.html"}],
+      "artifact_types": [{"id": "website", "name": "Website", "extensions": ["html", "htm"], "preview": "html", "script": "project-builder.sh", "output": "{source}"}]
+    },
+    {
+      "id": "mini-app",
+      "name": "Mini-app",
+      "description": "Build a real React mini-app package with a live browser artifact.",
+      "guidance": "Treat index.jsx as the app entry and mobius.json as its package contract. Build one useful interaction first, keep it keyboard-accessible and self-contained, and verify the browser artifact after meaningful changes.",
+      "skills": ["webstudio-project.md"],
+      "dependencies": [],
+      "files": {
+        "index.jsx": "templates/mini-app/index.jsx",
+        "mobius.json": "templates/mini-app/mobius.json"
+      },
+      "previews": [{"id": "app", "name": "Mini-app", "kind": "html", "path": "index.jsx"}],
+      "artifact_types": [{"id": "mini-app", "name": "Mini-app", "extensions": ["jsx", "tsx"], "preview": "html", "script": "mini-app-builder.sh", "output": "index.html"}]
+    },
+    {
+      "id": "visualization",
+      "name": "Interactive visualization",
+      "description": "Explore first-class data and rendering source through a presentation-ready chart.",
+      "guidance": "Keep sample data in data.js and rendering behavior in visualization.js. Prioritize legible labels, keyboard interaction, an informative empty state, and no external load-time dependencies.",
+      "skills": ["webstudio-project.md"],
+      "dependencies": [],
+      "files": {
+        "index.html": "templates/visualization/index.html",
+        "visualization.css": "templates/visualization/visualization.css",
+        "data.js": "templates/visualization/data.js",
+        "visualization.js": "templates/visualization/visualization.js"
+      },
+      "previews": [{"id": "visualization", "name": "Visualization", "kind": "html", "path": "index.html"}],
+      "artifact_types": [{"id": "website", "name": "Visualization", "extensions": ["html", "htm"], "preview": "html", "script": "project-builder.sh", "output": "{source}"}]
+    },
+    {
+      "id": "document",
+      "name": "Document",
+      "description": "Draft in Markdown with a live reading view and a typeset document artifact.",
+      "guidance": "Write for the reader in document.md. Use semantic headings, concise sections, lists, emphasis, links, and blockquotes; save to rebuild the self-contained reading artifact.",
+      "skills": ["webstudio-project.md"],
+      "dependencies": [],
+      "files": {
+        "document.md": "templates/document.md",
+        "assets/cover.png": "templates/artwork/document.png"
+      },
+      "previews": [{"id": "document", "name": "Document", "kind": "html", "path": "document.md"}],
+      "artifact_types": [{"id": "document", "name": "Document", "extensions": ["md", "markdown"], "preview": "html", "script": "document-builder.sh", "output": "index.html"}]
+    },
+    {
+      "id": "spreadsheet",
+      "name": "Spreadsheet",
+      "description": "Edit durable CSV cells in a live grid and publish a responsive data view.",
+      "guidance": "Treat sheet.csv as the source of truth. Keep a clear header row and one record per row; use the grid editor for routine changes and rebuild the self-contained data artifact after saving.",
+      "skills": ["webstudio-project.md"],
+      "dependencies": [],
+      "files": {
+        "sheet.csv": "templates/sheet.csv",
+        "assets/cover.png": "templates/artwork/spreadsheet.png"
+      },
+      "previews": [{"id": "sheet", "name": "Spreadsheet", "kind": "html", "path": "sheet.csv"}],
+      "artifact_types": [{"id": "spreadsheet", "name": "Spreadsheet", "extensions": ["csv"], "preview": "html", "script": "spreadsheet-builder.sh", "output": "index.html"}]
+    },
+    {
+      "id": "presentation",
+      "name": "Presentation",
+      "description": "Shape a responsive narrative deck with a live, presentation-ready preview.",
+      "guidance": "Build the story directly in index.html. Keep every slide semantic, concise, keyboard-accessible, responsive, and self-contained without external load-time dependencies.",
+      "skills": ["webstudio-project.md"],
+      "dependencies": [],
+      "files": {
+        "index.html": "templates/presentation/index.html",
+        "assets/cover.png": "templates/artwork/presentation.png"
+      },
+      "previews": [{"id": "presentation", "name": "Presentation", "kind": "html", "path": "index.html"}],
+      "artifact_types": [{"id": "presentation", "name": "Presentation", "extensions": ["html", "htm"], "preview": "html", "script": "project-builder.sh", "output": "{source}"}]
     }
   ]
 }
