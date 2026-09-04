@@ -12,7 +12,7 @@ const spreadsheetBuilder = read('spreadsheet-builder.py')
 const guidance = read('webstudio-project.md')
 
 test('Web Studio declares durable source contracts for every project format', () => {
-  assert.equal(manifest.version, '1.3.0')
+  assert.equal(manifest.version, '1.3.3')
   assert.equal(manifest.embeds_agent, false)
   assert.deepEqual(manifest.offline, { reads: true, writes: 'none', execution: 'none' })
   assert.deepEqual(manifest.project_templates.map((template) => template.id), [
@@ -51,17 +51,21 @@ test('Web Studio declares durable source contracts for every project format', ()
   assert.doesNotThrow(() => new Function(presentationScript))
 })
 
-test('the launcher creates and labels every Web Studio project type', () => {
-  assert.match(source, /const TEMPLATES = \[/)
+test('the launcher creates websites and labels every supported project type', () => {
+  assert.match(source, /const TYPES = \{/)
   for (const id of ['website', 'mini-app', 'visualization', 'document', 'spreadsheet', 'presentation']) {
     assert.match(source, new RegExp(`id: '${id}'`))
-    assert.match(source, new RegExp(`webstudio:\\$\\{template\\.id\\}`))
   }
+  assert.match(source, /const WEBSITE = TYPES\.website/)
+  assert.match(source, /createWebsite/)
+  assert.match(source, /templateId: `webstudio:\$\{WEBSITE\.id\}`/)
   assert.match(source, /window\.mobius\?\.projects/)
   for (const operation of ['migrate', 'list', 'create', 'open', 'browse']) {
     assert.match(source, new RegExp(`projectApi\\??\\.${operation}`))
   }
   assert.doesNotMatch(source, /mobius\?\.storage|mobius\.chat|localStorage|<select/)
+  assert.doesNotMatch(source, /const project = await projectApi\.create/)
+  assert.match(source, /--project-row-accent/)
   assert.match(source, /min-height:\s*44px/)
   assert.match(source, /:focus-visible/)
 })
@@ -75,8 +79,14 @@ test('builders stay confined and never publish repository internals', () => {
   assert.match(builder, /! -name node_modules/)
   assert.match(miniBuilder, /relative\.startsWith\('\.\.'\)/)
   assert.match(miniBuilder, /bundle:\s*true/)
+  assert.match(miniBuilder, /MOBIUS_FRONTEND_NODE_MODULES/)
+  assert.match(miniBuilder, /platform', 'frontend', 'node_modules/)
+  assert.match(miniBuilder, /nodePaths:\s*\[\.\.\.sharedNodeModulePaths\(\)/)
   assert.match(documentBuilder, /html\.escape/)
   assert.match(spreadsheetBuilder, /csv\.reader/)
   assert.match(guidance, /Edit source files directly under `\$PROJECT_ROOT`/)
   assert.match(guidance, /Do not load CDNs, remote fonts, scripts, or images/)
+  assert.match(guidance, /When there is no `\$PROJECT_ROOT`/)
+  assert.match(guidance, /Projects → New → Import existing/)
+  assert.match(guidance, /building-apps-quickstart/)
 })

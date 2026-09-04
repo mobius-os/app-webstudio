@@ -1,6 +1,20 @@
+import { existsSync } from 'node:fs'
 import { cp, mkdir, readdir, rm, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { build } from 'esbuild'
+
+const appRoot = import.meta.dirname
+
+function sharedNodeModulePaths() {
+  const configured = process.env.MOBIUS_FRONTEND_NODE_MODULES
+  const candidates = [
+    configured,
+    path.join(appRoot, '.mobius', 'frontend', 'node_modules'),
+    path.join(appRoot, '..', '..', 'platform', 'frontend', 'node_modules'),
+    '/app/shell-src/node_modules',
+  ]
+  return [...new Set(candidates.filter(candidate => candidate && existsSync(candidate)))]
+}
 
 const root = path.resolve(process.env.PROJECT_ROOT || '')
 const source = path.resolve(root, process.env.PROJECT_SOURCE || '')
@@ -33,7 +47,10 @@ await build({
   format: 'iife',
   platform: 'browser',
   jsx: 'automatic',
-  nodePaths: [path.join(import.meta.dirname, 'node_modules')],
+  // Project previews accept the same bare imports as installed mini-apps.
+  // Resolve those packages from the platform-owned runtime tree first so an
+  // imported app does not need its own copied node_modules directory.
+  nodePaths: [...sharedNodeModulePaths(), path.join(appRoot, 'node_modules')],
   logLevel: 'warning',
 })
 await unlink(entry)
