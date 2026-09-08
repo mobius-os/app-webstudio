@@ -1,22 +1,25 @@
 # Web Studio
 
-Web Studio creates and reopens first-class Möbius Projects for websites,
-mini-apps, interactive visualizations, documents, spreadsheets, and
-presentations. Projects owns their files, chats, build history, preview, and
-built artifacts.
+Web Studio is a Project app for websites only. It adds **Website** to
+**Projects +**, and provides a focused launcher for your website projects.
+Projects owns the source files, chats, build history, and preview.
 
 ## Project contract
 
-- Template types: `webstudio:website`, `mini-app`, `visualization`, `document`,
-  `spreadsheet`, and `presentation`
-- Starter source: local HTML/CSS/JS, React, Markdown, or CSV according to type
-- Build actions: confined self-contained website, mini-app, reading-view, and
-  data-view builders
-- Artwork: each example format carries crop-safe local cover art
+- Template: `webstudio:website`
+- Starter source: local `index.html`, `style.css`, and `app.js`
+- Build: `project-builder.sh` produces a self-contained website Creation
 - Agent guidance: `webstudio-project.md`
 
-The installed app deliberately does not keep a parallel editor, chat, preview,
-or file store. Those shared workspace responsibilities belong to Projects.
+Web Studio has no mini-app, visualization, document, spreadsheet, or
+presentation templates or specialist builders. App projects belong to core
+Möbius; other formats can be supplied by other Project apps.
+
+Existing projects and built outputs are not deleted by this change. Older
+non-website projects remain accessible through Projects in the shell drawer, but their removed
+specialist builders are no longer supplied by Web Studio.
+
+The app does not keep a parallel editor, chat, preview, or file store.
 
 ## Checks
 
@@ -24,6 +27,3 @@ or file store. Those shared workspace responsibilities belong to Projects.
 npm test
 npm run smoke
 ```
-
-The checks validate the project manifest and launcher contract, syntax-check
-the builder, and compile the app entry with Möbius's frontend compiler.

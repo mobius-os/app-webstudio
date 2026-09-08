@@ -6,7 +6,7 @@
   "description": "Web Studio \u2014 Mobius catalog app. Dev tooling only; the app itself ships via mobius.json source_files.",
   "license": "MIT",
   "scripts": {
-    "test": "node --test tests/*.test.mjs && bash -n project-builder.sh mini-app-builder.sh document-builder.sh spreadsheet-builder.sh && python3 -m py_compile document-builder.py spreadsheet-builder.py",
+    "test": "node --test tests/*.test.mjs && bash -n project-builder.sh",
     "smoke": "node tests/smoke.mjs"
   },
   "devDependencies": {
