@@ -1,92 +1,64 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 
-const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
+const path = (name) => new URL(`../${name}`, import.meta.url)
+const read = (name) => readFileSync(path(name), 'utf8')
 const manifest = JSON.parse(read('mobius.json'))
 const source = read('index.jsx')
 const builder = read('project-builder.sh')
-const miniBuilder = read('mini-app-builder.mjs')
-const documentBuilder = read('document-builder.py')
-const spreadsheetBuilder = read('spreadsheet-builder.py')
 const guidance = read('webstudio-project.md')
 
-test('Web Studio declares durable source contracts for every project format', () => {
-  assert.equal(manifest.version, '1.3.3')
+test('Web Studio ships exactly one website template and builder, not hidden specialist formats', () => {
   assert.equal(manifest.embeds_agent, false)
   assert.deepEqual(manifest.offline, { reads: true, writes: 'none', execution: 'none' })
-  assert.deepEqual(manifest.project_templates.map((template) => template.id), [
-    'website', 'mini-app', 'visualization', 'document', 'spreadsheet', 'presentation',
+  assert.deepEqual(manifest.project_templates.map(template => template.id), ['website'])
+  const [website] = manifest.project_templates
+  assert.deepEqual(Object.keys(website.files), ['index.html', 'style.css', 'app.js'])
+  assert.equal(website.previews[0].kind, 'html')
+  assert.equal(website.artifact_types[0].script, 'project-builder.sh')
+  assert.deepEqual(manifest.source_files, [
+    'webstudio-project.md', 'project-builder.sh',
+    'templates/index.html', 'templates/style.css', 'templates/app.js',
   ])
-
-  const byId = Object.fromEntries(manifest.project_templates.map(template => [template.id, template]))
-  assert.deepEqual(Object.keys(byId.website.files), ['index.html', 'style.css', 'app.js'])
-  assert.deepEqual(Object.keys(byId['mini-app'].files), ['index.jsx', 'mobius.json'])
-  assert.deepEqual(Object.keys(byId.visualization.files), ['index.html', 'visualization.css', 'data.js', 'visualization.js'])
-  assert.deepEqual(byId.document.files, {
-    'document.md': 'templates/document.md',
-    'assets/cover.png': 'templates/artwork/document.png',
-  })
-  assert.deepEqual(byId.spreadsheet.files, {
-    'sheet.csv': 'templates/sheet.csv',
-    'assets/cover.png': 'templates/artwork/spreadsheet.png',
-  })
-  assert.deepEqual(byId.presentation.files, {
-    'index.html': 'templates/presentation/index.html',
-    'assets/cover.png': 'templates/artwork/presentation.png',
-  })
-  assert.equal(byId['mini-app'].artifact_types[0].script, 'mini-app-builder.sh')
-  assert.equal(byId.document.artifact_types[0].script, 'document-builder.sh')
-  assert.equal(byId.spreadsheet.artifact_types[0].script, 'spreadsheet-builder.sh')
-  for (const template of manifest.project_templates) {
-    assert.equal(template.previews[0].kind, 'html')
-    assert.ok(manifest.source_files.includes(template.artifact_types[0].script))
-    for (const sourcePath of Object.values(template.files)) {
-      assert.ok(manifest.source_files.includes(sourcePath), `${sourcePath} must ship with the app`)
-    }
+  for (const name of manifest.source_files) assert.ok(existsSync(path(name)), name)
+  for (const name of ['mini-app-builder.sh', 'mini-app-builder.mjs', 'document-builder.sh',
+    'document-builder.py', 'spreadsheet-builder.sh', 'spreadsheet-builder.py',
+    'templates/mini-app/index.jsx', 'templates/visualization/index.html',
+    'templates/document.md', 'templates/sheet.csv', 'templates/presentation/index.html']) {
+    assert.equal(existsSync(path(name)), false, `${name} must be removed, not retired`)
   }
-  assert.doesNotMatch(read('templates/presentation/index.html'), /https?:\/\//)
-  const presentationScript = read('templates/presentation/index.html').match(/<script>([\s\S]*?)<\/script>/)?.[1]
-  assert.ok(presentationScript)
-  assert.doesNotThrow(() => new Function(presentationScript))
 })
 
-test('the launcher creates websites and labels every supported project type', () => {
-  assert.match(source, /const TYPES = \{/)
-  for (const id of ['website', 'mini-app', 'visualization', 'document', 'spreadsheet', 'presentation']) {
-    assert.match(source, new RegExp(`id: '${id}'`))
-  }
-  assert.match(source, /const WEBSITE = TYPES\.website/)
-  assert.match(source, /createWebsite/)
-  assert.match(source, /templateId: `webstudio:\$\{WEBSITE\.id\}`/)
+test('the launcher creates and lists websites only without duplicating drawer navigation', () => {
+  assert.match(source, /const LOCAL_TEMPLATE_ID = 'website'/)
+  assert.match(source, /rows\.filter\(row => row\.template\?\.id === LOCAL_TEMPLATE_ID\)/)
+  assert.match(source, /setProjects\(websites\)/)
+  assert.match(source, /templates\.find\(row => row\.id === LOCAL_TEMPLATE_ID\)/)
+  assert.match(source, /templateId: template\.key/)
   assert.match(source, /window\.mobius\?\.projects/)
-  for (const operation of ['migrate', 'list', 'create', 'open', 'browse']) {
+  for (const operation of ['templates', 'migrate', 'list', 'create', 'open']) {
     assert.match(source, new RegExp(`projectApi\\??\\.${operation}`))
   }
+  assert.doesNotMatch(source, /const TYPES|visualization|spreadsheet|presentation|mini-app/)
   assert.doesNotMatch(source, /mobius\?\.storage|mobius\.chat|localStorage|<select/)
-  assert.doesNotMatch(source, /const project = await projectApi\.create/)
+  assert.match(source, /Your websites/)
+  assert.doesNotMatch(source, /projectApi\.browse|wsx-footer|All Projects & project types/)
   assert.match(source, /--project-row-accent/)
   assert.match(source, /min-height:\s*44px/)
   assert.match(source, /:focus-visible/)
 })
 
-test('builders stay confined and never publish repository internals', () => {
+test('website build and guidance preserve the project source boundary', () => {
   for (const name of ['PROJECT_ROOT', 'PROJECT_SOURCE', 'PROJECT_OUTPUT_DIR']) {
     assert.match(builder, new RegExp(`\\$\\{${name}:\\?`))
   }
   assert.match(builder, /! -name artifacts/)
   assert.match(builder, /! -name \.git/)
   assert.match(builder, /! -name node_modules/)
-  assert.match(miniBuilder, /relative\.startsWith\('\.\.'\)/)
-  assert.match(miniBuilder, /bundle:\s*true/)
-  assert.match(miniBuilder, /MOBIUS_FRONTEND_NODE_MODULES/)
-  assert.match(miniBuilder, /platform', 'frontend', 'node_modules/)
-  assert.match(miniBuilder, /nodePaths:\s*\[\.\.\.sharedNodeModulePaths\(\)/)
-  assert.match(documentBuilder, /html\.escape/)
-  assert.match(spreadsheetBuilder, /csv\.reader/)
   assert.match(guidance, /Edit source files directly under `\$PROJECT_ROOT`/)
   assert.match(guidance, /Do not load CDNs, remote fonts, scripts, or images/)
   assert.match(guidance, /When there is no `\$PROJECT_ROOT`/)
-  assert.match(guidance, /Projects → New → Import existing/)
-  assert.match(guidance, /building-apps-quickstart/)
+  assert.match(guidance, /adds Website projects only/)
+  assert.doesNotMatch(guidance, /Build or edit a Website, Mini-app|CSV for|Markdown for/)
 })
