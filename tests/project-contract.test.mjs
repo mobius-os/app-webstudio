@@ -16,7 +16,7 @@ test('Web Studio ships exactly one website template and builder, not hidden spec
   const [website] = manifest.project_templates
   assert.deepEqual(Object.keys(website.files), ['index.html', 'style.css', 'app.js'])
   assert.deepEqual(website.previews[0], {
-    id: 'website', name: 'Website', source: 'index.html', builder: 'website',
+    id: 'website', name: 'Website', kind: 'html', path: 'index.html',
   })
   assert.equal(website.artifact_types[0].script, 'project-builder.sh')
   assert.deepEqual(manifest.source_files, [
