@@ -56,8 +56,8 @@
         {
           "id": "website",
           "name": "Website",
-          "kind": "html",
-          "path": "index.html"
+          "source": "index.html",
+          "builder": "website"
         }
       ],
       "artifact_types": [
