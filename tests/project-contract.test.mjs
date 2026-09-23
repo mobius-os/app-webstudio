@@ -11,7 +11,8 @@ const guidance = read('webstudio-project.md')
 
 test('Web Studio ships exactly one website template and builder, not hidden specialist formats', () => {
   assert.equal(manifest.embeds_agent, false)
-  assert.deepEqual(manifest.offline, { reads: true, writes: 'none', execution: 'none' })
+  assert.equal(manifest.offline_capable, false)
+  assert.deepEqual(manifest.offline, { reads: false, writes: 'none', execution: 'none' })
   assert.deepEqual(manifest.project_templates.map(template => template.id), ['website'])
   const [website] = manifest.project_templates
   assert.deepEqual(Object.keys(website.files), ['index.html', 'style.css', 'app.js'])
@@ -39,9 +40,12 @@ test('the launcher creates and lists websites only without duplicating drawer na
   assert.match(source, /templates\.find\(row => row\.id === LOCAL_TEMPLATE_ID\)/)
   assert.match(source, /templateId: template\.key/)
   assert.match(source, /window\.mobius\?\.projects/)
-  for (const operation of ['templates', 'migrate', 'list', 'create', 'open']) {
+  assert.match(source, /onOnlineChange/)
+  assert.match(source, /retry when you reconnect/)
+  for (const operation of ['templates', 'list', 'create', 'open']) {
     assert.match(source, new RegExp(`projectApi\\??\\.${operation}`))
   }
+  assert.doesNotMatch(source, /projectApi\??\.migrate/)
   assert.doesNotMatch(source, /const TYPES|visualization|spreadsheet|presentation|mini-app/)
   assert.doesNotMatch(source, /mobius\?\.storage|mobius\.chat|localStorage|<select/)
   assert.match(source, /Your websites/)

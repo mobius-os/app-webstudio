@@ -1,16 +1,16 @@
 {
   "id": "webstudio",
   "name": "Web Studio",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "A Project app that adds Website projects to M\u00f6bius.",
   "author": "mobius-os",
   "license": "MIT",
   "homepage": "https://github.com/mobius-os/app-webstudio",
   "entry": "index.jsx",
   "icon": "icon.png",
-  "offline_capable": true,
+  "offline_capable": false,
   "offline": {
-    "reads": true,
+    "reads": false,
     "writes": "none",
     "execution": "none"
   },
