@@ -23,6 +23,7 @@ test('Web Studio ships exactly one website template and builder, not hidden spec
   assert.deepEqual(manifest.source_files, [
     'webstudio-project.md', 'project-builder.sh',
     'templates/index.html', 'templates/style.css', 'templates/app.js',
+    'latest-request.js',
   ])
   for (const name of manifest.source_files) assert.ok(existsSync(path(name)), name)
   for (const name of ['mini-app-builder.sh', 'mini-app-builder.mjs', 'document-builder.sh',
