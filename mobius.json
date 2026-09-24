@@ -32,7 +32,8 @@
     "project-builder.sh",
     "templates/index.html",
     "templates/style.css",
-    "templates/app.js"
+    "templates/app.js",
+    "latest-request.js"
   ],
   "skills": [
     "webstudio-project.md"

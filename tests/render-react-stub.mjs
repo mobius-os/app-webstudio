@@ -6,6 +6,7 @@ export const useState = (initial) => [
 ]
 export const useCallback = (fn) => fn
 export const useMemo = (factory) => factory()
+export const useRef = (initial) => ({ current: initial })
 export const useEffect = (effect) => { effects.push(effect) }
 
-export default { useState, useCallback, useMemo, useEffect }
+export default { useState, useCallback, useMemo, useRef, useEffect }
