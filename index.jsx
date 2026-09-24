@@ -1,6 +1,7 @@
 /* A focused project launcher: resume work first, with creation owned by Projects. */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, WebsiteNetwork, Plus, Search } from '@openai/apps-sdk-ui/components/Icon'
+import { makeLatestRequestGate } from './latest-request.js'
 
 const LOCAL_TEMPLATE_ID = 'website'
 const CSS = `
@@ -56,25 +57,42 @@ export default function App({ appId }) {
   const [loadError, setLoadError] = useState('')
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const refreshGate = useRef(null)
+  if (!refreshGate.current) refreshGate.current = makeLatestRequestGate()
 
-  const refresh = useCallback(async ({ migrate = false } = {}) => {
+  const refresh = useCallback(async () => {
+    const requestId = refreshGate.current.begin()
     if (!projectApi?.templates) { setLoadError('Refresh Möbius to load Projects support.'); setLoading(false); return }
     setLoading(true)
     setLoadError('')
     try {
       const [rows, types] = await Promise.all([
-        migrate ? projectApi.migrate() : projectApi.list(),
+        projectApi.list(),
         projectApi.templates(),
       ])
+      if (!refreshGate.current.isCurrent(requestId)) return
       const websites = rows.filter(row => row.template?.id === LOCAL_TEMPLATE_ID)
       setProjects(websites)
       setTemplates(types)
       window.mobius?.signal?.('app_ready', { item_count: websites.length })
     } catch (cause) {
-      setLoadError(cause?.message || 'Could not load your projects. Try again.')
-    } finally { setLoading(false) }
+      if (!refreshGate.current.isCurrent(requestId)) return
+      setLoadError(window.mobius?.online === false
+        ? 'Web Studio needs a connection to load Projects. It will retry when you reconnect.'
+        : (cause?.message || 'Could not load your projects. Try again.'))
+    } finally {
+      if (refreshGate.current.isCurrent(requestId)) setLoading(false)
+    }
   }, [projectApi])
-  useEffect(() => { void refresh({ migrate: true }) }, [refresh])
+  useEffect(() => {
+    void refresh()
+    let initial = true
+    const detach = window.mobius?.onOnlineChange?.((online) => {
+      if (initial) { initial = false; return }
+      if (online) void refresh()
+    })
+    return () => { if (typeof detach === 'function') detach() }
+  }, [refresh])
 
   async function createProject() {
     const template = templates.find(row => row.id === LOCAL_TEMPLATE_ID)
