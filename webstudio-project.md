@@ -12,7 +12,7 @@ do not add those formats to Web Studio.
 ## Ordinary chat: build first, organize later
 
 When there is no `$PROJECT_ROOT`, do not manufacture a Project as a prerequisite.
-Read the `artifacts` skill to resolve the installed Pages app and mint the
+Read the `pages` skill to resolve the installed Pages app and mint the
 page's stable `artifact_id`. Author the website in its durable editable tree:
 `/data/apps/<PAGES_APP_ID>/sources/<artifact_id>/`. Start with `index.html` and
 keep all local CSS, JavaScript, and assets there. A multi-file website does not
@@ -20,7 +20,7 @@ require a Project; create one only when the owner asks for its workspace.
 
 Build a self-contained HTML preview from that source (inline local dependencies
 in the preview, not in place in the editable files), then publish an immutable
-Page version following `artifacts`. Include explicit builder provenance in the
+Page version following `pages`. Include explicit builder provenance in the
 Page record:
 
 ```json
