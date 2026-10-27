@@ -34,7 +34,7 @@ test('Web Studio ships exactly one website template and builder, not hidden spec
   }
 })
 
-test('the launcher creates and lists websites only without duplicating drawer navigation', () => {
+test('the launcher creates and lists websites only while linking to all projects', () => {
   assert.match(source, /const LOCAL_TEMPLATE_ID = 'website'/)
   assert.match(source, /rows\.filter\(row => row\.template\?\.id === LOCAL_TEMPLATE_ID\)/)
   assert.match(source, /setProjects\(websites\)/)
@@ -43,17 +43,24 @@ test('the launcher creates and lists websites only without duplicating drawer na
   assert.match(source, /window\.mobius\?\.projects/)
   assert.match(source, /onOnlineChange/)
   assert.match(source, /retry when you reconnect/)
-  for (const operation of ['templates', 'list', 'create', 'open']) {
+  for (const operation of ['templates', 'list', 'create', 'open', 'browse']) {
     assert.match(source, new RegExp(`projectApi\\??\\.${operation}`))
   }
   assert.doesNotMatch(source, /projectApi\??\.migrate/)
   assert.doesNotMatch(source, /const TYPES|visualization|spreadsheet|presentation|mini-app/)
   assert.doesNotMatch(source, /mobius\?\.storage|mobius\.chat|localStorage|<select/)
-  assert.match(source, /Your websites/)
-  assert.doesNotMatch(source, /projectApi\.browse|wsx-footer|All Projects & project types/)
+  assert.match(source, /Your projects/)
+  assert.match(source, /All projects/)
+  assert.doesNotMatch(source, /Refreshing…|>Refresh<|Refresh the list/)
   assert.match(source, /--project-row-accent/)
   assert.match(source, /min-height:\s*44px/)
   assert.match(source, /:focus-visible/)
+})
+
+test('new website starter does not describe autosave or a left-hand file list', () => {
+  const starter = read('templates/index.html')
+  assert.doesNotMatch(starter, /Changes save as you type|Edit the files on the left/)
+  assert.match(starter, /<strong>Build<\/strong>/)
 })
 
 test('website build and guidance preserve the project source boundary', () => {
