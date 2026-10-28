@@ -36,6 +36,7 @@ body { margin: 0; }
 .wsx-empty p { margin: 0 0 8px; }
 .wsx-error { color: var(--danger); font-size: 14px; line-height: 1.5; }
 .wsx-error p { margin: 8px 0; }
+.wsx-footer { margin-top: 20px; }
 .wsx-primary:focus-visible, .wsx-secondary:focus-visible, .wsx-project:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wsx-root button:disabled { cursor: default; opacity: .55; }
 .wsx-root ::selection { color: var(--text); background: var(--accent-dim, var(--surface)); }
@@ -47,6 +48,25 @@ body { margin: 0; }
   .wsx-primary { width: 100%; }
 }
 `
+
+export function projectTimestamp(value) {
+  if (!value) return NaN
+  // API timestamps without a timezone are UTC, not the viewer's local time.
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`
+  return Date.parse(normalized)
+}
+
+export function projectDate(value, now = Date.now()) {
+  const timestamp = projectTimestamp(value)
+  if (!Number.isFinite(timestamp)) return ''
+  const elapsed = now - timestamp
+  const distance = Math.abs(elapsed)
+  if (distance >= 7 * 86_400_000) return new Date(timestamp).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  if (distance < 60_000) return 'Just now'
+  const [unit, length] = distance < 3_600_000 ? ['minute', 60_000]
+    : distance < 86_400_000 ? ['hour', 3_600_000] : ['day', 86_400_000]
+  return new Intl.RelativeTimeFormat('en', { numeric: 'always' }).format(-Math.sign(elapsed) * Math.floor(distance / length), unit)
+}
 
 export default function App({ appId }) {
   const projectApi = window.mobius?.projects
@@ -62,7 +82,7 @@ export default function App({ appId }) {
 
   const refresh = useCallback(async () => {
     const requestId = refreshGate.current.begin()
-    if (!projectApi?.templates) { setLoadError('Refresh Möbius to load Projects support.'); setLoading(false); return }
+    if (!projectApi?.templates) { setLoadError('Projects support is unavailable. Check your Möbius installation.'); setLoading(false); return }
     setLoading(true)
     setLoadError('')
     try {
@@ -107,9 +127,14 @@ export default function App({ appId }) {
   async function openProject(id) {
     setError('')
     try { await projectApi.open(id) }
-    catch (cause) { setError(cause?.message || 'Could not open this project. Refresh the list and try again.') }
+    catch (cause) { setError(cause?.message || 'Could not open this project. Try again.') }
   }
-  const rows = useMemo(() => [...projects].sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))
+  async function browse() {
+    setError('')
+    try { await projectApi.browse() }
+    catch (cause) { setError(cause?.message || 'Could not open Projects. Try again.') }
+  }
+  const rows = useMemo(() => [...projects].sort((a, b) => (projectTimestamp(b.updated_at) || 0) - (projectTimestamp(a.updated_at) || 0))
     .filter(row => row.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())), [projects, search])
   const canCreate = templates.some(row => row.id === LOCAL_TEMPLATE_ID)
   return (
@@ -122,25 +147,26 @@ export default function App({ appId }) {
         </header>
         <div className="wsx-create">
           <button type="button" className="wsx-primary" disabled={creating || !canCreate} onClick={() => void createProject()}><Plus width={18} height={18} aria-hidden="true" />{creating ? 'Creating…' : 'New website'}</button>
-          {!loading && !loadError && !canCreate && <p className="wsx-error" role="alert">This project type is unavailable. Refresh the list or check the app installation.</p>}
+          {!loading && !loadError && !canCreate && <p className="wsx-error" role="alert">This project type is unavailable. Check the app installation.</p>}
         </div>
         {error && <p className="wsx-error" role="alert">{error}</p>}
         <section className="wsx-section" aria-labelledby="wsx-projects-title">
-          <header className="wsx-section-head"><h2 id="wsx-projects-title">Your websites</h2><button type="button" className="wsx-secondary" disabled={loading} onClick={() => void refresh()}>{loading ? 'Refreshing…' : 'Refresh'}</button></header>
+          <header className="wsx-section-head"><h2 id="wsx-projects-title">Your projects</h2></header>
           {loadError && <div className="wsx-error" role="alert"><p>{loadError}</p><button type="button" className="wsx-secondary" onClick={() => void refresh()}>Try again</button></div>}
           {projects.length > 0 && <label className="wsx-search"><Search width={18} height={18} aria-hidden="true" /><input type="search" aria-label="Find a website" placeholder="Find a website" value={search} onChange={event => setSearch(event.target.value)} /></label>}
           {loading && projects.length === 0 ? <p className="wsx-empty" role="status">Loading your websites…</p>
             : !loadError && projects.length === 0 ? <div className="wsx-empty"><p>Your website projects will appear here.</p><p>Start one above, then use its chat to describe what you want to make.</p></div>
             : rows.length === 0 && projects.length > 0 ? <div className="wsx-empty"><p>No websites match “{search}”.</p><button className="wsx-secondary" onClick={() => setSearch('')}>Clear search</button></div>
             : <div className="wsx-list">{rows.map(project => {
-              const date = new Date(project.updated_at || '')
+              const date = projectDate(project.updated_at)
               return <button type="button" className="wsx-project" key={project.id} onClick={() => void openProject(project.id)}>
                 <span className="wsx-project-icon" aria-hidden="true" style={{ '--project-row-accent': /^#[0-9a-f]{6}$/i.test(project.color || '') ? project.color : 'var(--text)' }}><WebsiteNetwork width={18} height={18} /></span>
-                <span className="wsx-project-copy"><strong>{project.name}</strong><small>{Number.isNaN(date.getTime()) ? 'Website' : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</small></span>
+                <span className="wsx-project-copy"><strong>{project.name}</strong><small>Website{date && ` · ${date}`}</small></span>
                 <ChevronRight width={16} height={16} aria-hidden="true" />
               </button>
             })}</div>}
         </section>
+        <footer className="wsx-footer"><button type="button" className="wsx-secondary" onClick={() => void browse()}>All projects <ChevronRight width={14} height={14} aria-hidden="true" /></button></footer>
       </div>
     </main>
   )
