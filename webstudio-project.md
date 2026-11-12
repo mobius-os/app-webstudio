@@ -62,5 +62,11 @@ do not modify the installed Web Studio app or its app-scoped storage.
 - Save meaningful changes and rebuild the registered website Creation, then
   verify the rendered result rather than trusting source alone. A Creation
   opens in its own viewer, independent of the project workspace.
+- From a chat, rebuild through the Project's build route instead of running
+  `project-builder.sh` yourself:
+  `mapi -f -X POST /api/projects/$PROJECT_ID/artifacts/<artifact_id>/build`.
+  List the artifact ids with `mapi -f /api/projects/$PROJECT_ID/artifacts`; read
+  the build log at `.../<artifact_id>/log`. The platform writes the output to
+  `artifacts/<artifact_id>/output/`, the only place the viewer reads.
 - Keep generated output under the Project's artifact area; never commit it with
   the editable source tree.
